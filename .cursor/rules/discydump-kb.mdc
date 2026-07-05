@@ -1,0 +1,69 @@
+---
+description: discydump — Souls Modding Wiki knowledge base (external, souls-script-kt)
+alwaysApply: true
+---
+
+# discydump — Souls Modding Wiki knowledge base (external)
+
+Local, semantically indexed archive of [Souls Modding Wiki](http://soulsmodding.wikidot.com) for agent reference. **Prefer this over guessing** for cross-game modding workflows, tools, tutorials, and glossary terms.
+
+**Location (out of this repo):** `S:\souls-script-kt\discydump\`
+
+## Start Here
+
+| File | Use when |
+|------|----------|
+| `S:\souls-script-kt\discydump\index.json` | **Master semantic index** — domains, stats, cross-refs, outdated warnings |
+| `S:\souls-script-kt\discydump\README.md` | Layout, regeneration, bot wiring |
+| `S:\souls-script-kt\discydump\tutorials.json` | "How do I…?" — tutorials with author, game, section, canonical URL |
+| `S:\souls-script-kt\discydump\tools.json` | "What tool for X?" — Smithbox, WitchyBND, DSAS, ModEngine, etc. |
+| `S:\souls-script-kt\discydump\glossary.json` | Term definitions extracted from wiki pages |
+| `S:\souls-script-kt\discydump\compressed\<domain>.md` | Domain-compressed guides (summaries + wiki links) |
+| `S:\souls-script-kt\discydump\by-game\<game>.json` | Filter by DS1 / DS2 / DS3 / ER / Sekiro / BB / AC6 / All |
+| `S:\souls-script-kt\discydump\raw\pages.jsonl` | Full page extract when compressed summary is insufficient |
+
+Regenerate: `python scripts/tools/scrape-soulsmodding-wiki.py` (from `souls-script-kt` repo).
+
+## Semantic domains
+
+Route questions by domain first:
+
+| ID | Label |
+|----|-------|
+| `getting-started` | Getting Started & Troubleshooting |
+| `tools` | Tools & Launchers |
+| `file-formats` | File Formats & Archives |
+| `parameters` | Parameters & SpEffects |
+| `models-textures` | Models & Textures |
+| `vfx-sfx` | Visual Effects & Bullets |
+| `animation-behavior` | Animation & Havok Behavior |
+| `scripting` | Event Scripting (EMEVD/ESD) |
+| `text-language` | Text & Localization |
+| `equipment` | Equipment, Items & Spells |
+| `maps` | Maps & World Editing |
+| `sound-audio` | Sound & Audio |
+| `hardcoded` | Hardcoded Systems & Debug |
+| `merging` | Mod Merging |
+| `meta` | Meta & Wiki |
+
+**Most relevant domains for soulstruct-blender:** `models-textures`, `animation-behavior`, `file-formats`.
+
+## Agent lookup workflow
+
+1. Classify question → **domain** + **game**
+2. Read `S:\souls-script-kt\discydump\compressed\<domain>.md` for compressed answer
+3. Cite canonical URL from `tutorials.json` or page slug in `by-domain/<domain>.json`
+4. Check `index.json` → `outdated_global_notes` before recommending tools
+
+## Outdated tooling (always warn)
+
+- **Yabber** → use **WitchyBND** for BND/DCX unpacking
+- **Yapped** → use **Smithbox** for param editing
+- **DS Map Studio** tutorials mostly apply to **Smithbox** (UI differs)
+- Some FXR XML tutorials superseded by **FXR Playground**
+
+## Scope notes
+
+- Sourced from community wiki; may lag behind Discord/tool updates
+- Not a substitute for `souls-script-kt/configs/paramdex/` (machine param schemas) or `nightreign-modding-lessons.mdc` (NR-specific lessons)
+- Live wiki: http://soulsmodding.wikidot.com/tutorial:main

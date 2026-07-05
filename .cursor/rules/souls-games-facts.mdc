@@ -1,0 +1,64 @@
+---
+description: FromSoftware games — collected facts for Blender add-on and DSAS context
+alwaysApply: true
+---
+
+# FromSoftware games — collected facts (Blender/DSAS context)
+
+Authoritative facts collected while working on this add-on. Do not invent beyond this list.
+
+## Games
+
+Demon's Souls, Dark Souls 1 / Remastered, DS2, DS3, Bloodborne, Sekiro, Elden Ring (ER), Armored Core 6, and Elden Ring: Nightreign (NR).
+
+**NR is ER-family:** shares FLVER version, param style, and most conventions with ER.
+
+**Current add-on focus:** **ER and NR**.
+
+## File formats & containers
+
+| Format | Role |
+|--------|------|
+| **FLVER** | Model format: meshes, bones, dummies, materials |
+| **CHRBND** | Character binder (`c####.chrbnd.dcx`): FLVER + skeleton + cloth |
+| **PARTSBND** | Equipment binder (`parts/` folder: `wp_a_####` weapons; `hd`/`bd`/`am`/`lg` armor) |
+| **ANIBND** | Animation binder: TAE + HKX Havok animations |
+| **DCX** | Compression wrapper |
+
+Use **WitchyBND** to unpack/repack binders externally.
+
+### Character & equipment
+
+- **c0000** is the player character: a **skeleton-only FLVER** (no meshes). All visible geometry comes from equipped armor **PARTSBND** parts.
+- Armor stems are gendered: `_m_` male / `_f_` female (e.g. `bd_m_1501`, `hd_f_0000`).
+- **ER preview default assembly order** (DSAS parity): legs → body → arms → head.
+
+### Dummies & attachment
+
+- FLVER **dummies** ("dummy polys") are attachment/effect points identified by **reference ID**; used for weapon attachment, VFX, hitboxes.
+- **`WepAbsorpPosParam`** rows give the dummy ID a weapon attaches to (e.g. `right_0`).
+- IDs **≥ 1000** encode: `manager = id // 1000` (0 = body c0000) and `local_ref_id = id % 1000`.
+
+### Bones
+
+- **`ctrl_`-prefixed bones** are non-deforming control/helper bones.
+- Regular bones deform meshes.
+
+### Animations
+
+- **c0000 animations:** base `c0000.anibnd.dcx` plus DLC binders (`c0000_dlc01`, `c0000_dlc02`).
+- **ER/NR attack clip stems:** `a{wepmotion:03d}_{sub:06d}` where `wepmotion` comes from `EquipParamWeapon.wepmotionCategory`.
+
+## Blender import lessons (this repo)
+
+| Lesson | Detail |
+|--------|--------|
+| Skeleton-only FLVERs (c0000) | Import with **EDIT bone data** (`force_edit_bones` import setting), **not CUSTOM**, or dummies/pose data are garbage |
+| DSAS `NewChrAsm` bone mapping | **ER** = DirectBoneMap (copy transforms of ALL shared bones); **ERNR/AC6** = RetargetRelativeAndDirectFKOrientation |
+| Assembly in Blender | Mirror DSAS with **COPY_TRANSFORMS** constraints — **no object parenting** (causes double transforms) |
+| Rigid meshes (weapons) | May lack `bone_indices` / `bone_weights` vertex fields; bind rigidly to bone 0 |
+| Param data | Read from Witchy `.param.xml` dumps: `EquipParamProtector`, `EquipParamWeapon`, `WepAbsorpPosParam` |
+
+## Deeper NR param work
+
+Shops, SpEffects, `regulation.bin`, and other NR-specific param lessons live in `S:\souls-script-kt\.cursor\rules\nightreign-modding-lessons.mdc` — consult when doing param work.

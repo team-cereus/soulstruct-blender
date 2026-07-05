@@ -1,0 +1,36 @@
+---
+description: Agent workflow rules for soulstruct-blender coding sessions
+alwaysApply: true
+---
+
+# Agent Workflow Rules
+
+## Subagent Usage (MANDATORY)
+
+- **ALWAYS delegate code writing, file edits, shell/build/test runs, and codebase exploration to subagents** using the Task tool. Never write or modify source code directly in the parent agent.
+- **ALWAYS use Composer 2.5 for subagents:** `model: "composer-2.5-fast"`. Never default to expensive models for subagent tasks.
+- **Remind yourself at the start of every task**: "I must use Composer 2.5 subagents for all code changes."
+- The parent agent's role is to **plan, coordinate, review, and communicate** — not to write code.
+
+## When to Use Subagents
+
+- Writing or editing source code files (`.py`, `.ps1`, `.md`, etc.)
+- Running shell commands (builds, tests, `build_cereus_addon.ps1`, headless Blender scripts)
+- Searching/exploring the codebase for context gathering
+- Any multi-step file modification task
+
+## When the Parent Agent May Act Directly
+
+- Creating or editing cursor rules (`.cursor/rules/*.mdc`)
+- Writing TODO lists and plans
+- Reading files for context (read-only)
+- Communicating with the user
+- Simple single-file reads to check results
+
+## Subagent Checklist
+
+Before every coding task, verify:
+
+1. Am I about to write code? → Delegate to subagent with `model: "composer-2.5-fast"`
+2. Am I about to run a build/test? → Delegate to shell subagent with `model: "composer-2.5-fast"`
+3. Am I exploring the codebase? → Use explore subagent with `model: "composer-2.5-fast"`

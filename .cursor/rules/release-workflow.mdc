@@ -1,0 +1,40 @@
+---
+description: Commit discipline and shareable installer release workflow for soulstruct-blender
+alwaysApply: true
+---
+
+# Release Workflow (soulstruct-blender)
+
+## Commits
+
+- **ALWAYS commit when a unit of work is done** — do not leave finished work uncommitted.
+- Follow conventional commit format in **`.cursor/rules/commit-messages.mdc`** (types, scopes, submodule bump wording).
+
+### Submodule order
+
+Changes inside `io_soulstruct_lib/soulstruct` or `io_soulstruct_lib/soulstruct-havok`:
+
+1. Commit **in the submodule** with a clear message.
+2. Commit the parent repo pointer bump: `chore(submodules): bump soulstruct[-havok] for <reason>`.
+
+## Shareable installer (after every push)
+
+After **every push to origin**, rebuild the non-developer zip from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_cereus_addon.ps1
+```
+
+What it does:
+
+- Stages `io_soulstruct/` + `io_soulstruct_lib/` (strips `__pycache__`, `.git`, build artifacts)
+- Writes **`INSTALL.txt`** with step-by-step install for non-developers
+- Produces **`dist/soulstruct-blender-cereus-<version>-<date>.zip`** (~23 MB)
+
+**Verify:** confirm the zip exists; report **full path and file size** to the user.
+
+### Non-developer installer requirements
+
+- **`INSTALL.txt` must stay accurate:** two folders side-by-side under Blender's `scripts/addons/` (`io_soulstruct` + `io_soulstruct_lib`); first enable needs **internet** for pip dependencies.
+- **Version in zip name** should track **`bl_info["version"]`** in `io_soulstruct/__init__.py` (source of truth). Align `build_cereus_addon.ps1` `-Version` default if it drifts.
+- **`dist/` is a build artifact — do not commit it.**
