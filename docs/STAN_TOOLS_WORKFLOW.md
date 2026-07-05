@@ -50,7 +50,7 @@ flowchart LR
 | **Stan's Tools** (addon tab) | Search characters, NPC mesh variants, animation search, mod folder, game auto-detect | `io_soulstruct/.../stan_tools/` |
 | **souls-script-kt** | `NpcParam.param.xml`, character name JSON generation, `.nr.kts` param mods (separate from animation) | `param-nightreign/regulation-bin/` |
 | **Smithbox / Witchy** | Param **editing** if not using Kotlin scripts | Wiki: use Smithbox, not Yapped |
-| **DSAS** (DS Anim Studio) | TAE events (SFX, hitboxes, i-frames), viewport preview, **in-game live reload** | `S:\_modding\tools\DSAnimStudio` |
+| **DSAS** (DS Anim Studio) | TAE events (SFX, hitboxes, i-frames), viewport preview, **in-game live reload** | `S:\_modding\tools\DSAnimStudio` (local clone) |
 | **ModEngine 3** | Loads `Game/mod/` overrides | Mod Folder = `...\Game\mod` |
 | **Aqua Toolset** | Optional FLVER→FBX if not using Blender mesh import | Legacy path in wiki tutorials |
 | **HavokMax / HCT 2018** | Reference + version conversion in **old** tutorials; fork uses `CompressAnim.exe` for export | See `DEV_ER_ANIMATION.md` §7 |
@@ -116,18 +116,33 @@ Open **3D Viewport → N → Stan's Tools** (not the top menu bar).
 
 | Control | Purpose |
 |---------|---------|
-| **Search Character by Name** | Imports **CHRBND only** (no animation yet) |
+| **Player Character (weapon testing)** | Load **c0000 + BD/AM/LG** armor once (DSAS-style bone glue). Required before the Weapons tab appears. Gender selector + **Load Player Character (DSAS)**. |
+| **Search Character by Name** | Imports **CHRBND only** for NPCs (no animation yet) — separate from player load |
 | **Load Character Animation** | Search popup over active character's ANIBND clips |
 | **NPC Param** dropdown | Picks NpcParam row for this `c####` |
 | **Apply NPC Param Visibility** | Re-run mesh split / visibility if needed |
 | **Show All Meshes** | Ignore draw masks temporarily |
 | **Refresh** (icon) | Reload NpcParam list from XML |
 
+Load the **player character** once for weapon preview; equipping weapons replaces only the weapon mesh on the same c0000 body.
+
 **NPC Param behavior:** Changing the dropdown **applies visibility immediately** (DSAS Entity-tab style). Import does **not** run the heavy mesh split automatically — pick a row when you need the correct parts visible.
 
 ### Animation
 
 Same as **Animation** tab: **Export Character Animation**, frame range options, etc.
+
+### Weapons
+
+| Control | Purpose |
+|---------|---------|
+| **Search Weapon by Name** | Equip weapon PARTSBND on loaded player (unequips previous weapon; does **not** reload c0000) |
+| **EquipParamWeapon XML** | Witchy `EquipParamWeapon.param.xml` for `wepmotionCategory` and `absorpParamId` (hand attachment via `WepAbsorpPosParam.param.xml`) |
+| **c0000 Sub-ANIBND** | Player attack clips live in c0000 sub-binders (e.g. `c0000_a00`) |
+| **Attack Slot** | DS1-style hand/action offset (RH light, 2H heavy, running, etc.) |
+| **Load Weapon Attack** | Applies selected c0000 attack clip to the **player c0000** armature (weapon follows via hand bone parent) |
+
+Attack animation ids follow `wepmotionCategory * 10000 + hand_offset + action_offset` (ER/NR use the same `wepmotionCategory` field). Bundled weapon metadata: `general/weapon_names/` (regenerate via `gen-weapon-names.py` in souls-script-kt).
 
 ---
 
@@ -162,6 +177,23 @@ python scripts/tools/gen-character-names.py
 ```
 
 - Per-machine fixes: `overrides.json` in the same folder (`"7720": "Knight Artorias"`).
+
+### Weapon preview + attacks
+
+1. **Stan's Tools → Characters → Load Player Character (DSAS)** — c0000 skeleton + armor (male/female).
+2. **Stan's Tools → Weapons → Search Weapon by Name** → e.g. `2670000` (Artorias greatsword). Replaces prior weapon only.
+3. Point **EquipParamWeapon XML** (Setup or Weapons panel) for accurate `wepmotionCategory` and hand attachment (`WepAbsorpPosParam.param.xml` alongside it in `regulation-bin/`).
+4. Pick **c0000 Sub-ANIBND** (refresh if empty) and an **Attack Slot** → **Load Weapon Attack**.
+5. Attack animation plays on **player c0000**; weapon is bone-parented to `R_Hand` / `L_Hand` from WepAbsorpPos.
+
+**Debug logging:** Enable **Enable Debug Logging** in Soulstruct Setup. Stan's Tools writes detailed traces to the Blender console and to `%TEMP%\soulstruct-stan-tools.log` (Windows: `%TEMP%` env var). DSAS reference clone: `S:\_modding\tools\DSAnimStudio`.
+
+Regenerate weapon search JSON:
+
+```bash
+cd S:\souls-script-kt
+python scripts/tools/gen-weapon-names.py
+```
 
 ---
 
@@ -229,6 +261,9 @@ The fork resolves **which compendium** to use from each clip's binder path (and 
 | `param-nightreign/regulation-bin/NpcParam.param.xml` | Stan's Tools NPC Param list + draw masks |
 | `configs/paramdex/NR/` | `gen-character-names.py` labels |
 | `scripts/tools/gen-character-names.py` | Regenerate `character_names/*.json` in addon |
+| `param-er/regulation-bin/EquipParamWeapon.param.xml` | Weapon `wepmotionCategory` + `absorpParamId` for attack slots and hand attach |
+| `param-er/regulation-bin/WepAbsorpPosParam.param.xml` | Weapon hand bone (`R_Hand` / `L_Hand`) from `dispPosType_right_0` |
+| `scripts/tools/gen-weapon-names.py` | Regenerate `weapon_names/*.json` in addon |
 | `.nr.kts` mods | Gameplay params — **orthogonal** to animation export unless you also ship param mods |
 
 Nightreign regulation **decrypt** is not in Blender; use pre-dumped Witchy XML from the repo or your own Smithbox/Witchy export.
@@ -281,6 +316,9 @@ cmd /c mklink /J "$addons\io_soulstruct_lib" "S:\_modding\tools\soulstruct-blend
 # Regenerate character search names
 cd S:\souls-script-kt
 python scripts/tools/gen-character-names.py
+
+# Regenerate weapon search metadata
+python scripts/tools/gen-weapon-names.py
 ```
 
 Reload addon after pulling: **F3 → Reload Scripts** for `soulstruct.blender.*` only; restart Blender after `soulstruct` / `soulstruct-havok` submodule changes.

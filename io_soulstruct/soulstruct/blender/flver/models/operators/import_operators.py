@@ -105,6 +105,9 @@ class BaseFLVERImportOperator(LoggingImportOperator):
         bl_flver = None
         for bl_name, flver in flvers:
 
+            if not flver.meshes:
+                self.warning(f"FLVER '{bl_name}' has no meshes (skeleton-only).")
+
             try:
                 bl_flver = BlenderFLVER.new_from_soulstruct_obj(
                     self,

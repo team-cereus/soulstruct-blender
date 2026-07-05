@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = [
     "StanSetupPanel",
     "StanCharactersPanel",
+    "StanWeaponsPanel",
     "StanAnimationPanel",
     "StanViewportPanel",
 ]
@@ -18,15 +19,20 @@ from soulstruct.blender.animation.export_operators import ExportCharacterHKXAnim
 
 from .character_search import StanSearchCharacterToImport
 from .animation_search import StanSearchCharacterAnimation
+from .weapon_search import StanSearchWeaponToImport, _iter_parts_directories
+from .weapon_anim import StanLoadWeaponAttackAnimation
+from .player_character import StanLoadPlayerCharacter, is_player_character_loaded
 from .operators import (
     AutoDetectGameDirectory,
     StanRefreshNpcParamList,
+    StanRefreshC0000SubAnibndList,
     StanApplyNpcParamDrawMask,
     StanShowAllCharacterMeshes,
     StanApplySceneLighting,
     StanRemoveSceneLighting,
 )
 from .npc_param import _resolve_npc_param_xml_path
+from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
 
 STAN_TOOLS_CATEGORY = "Stan's Tools"
@@ -79,6 +85,12 @@ class StanSetupPanel(_StanToolsPanel):
         elif stan.npc_param_xml_path or settings.project_root_path:
             layout.label(text="NpcParam.param.xml not found", icon="ERROR")
 
+        layout.label(text="EquipParamWeapon (weapon attacks):")
+        layout.prop(stan, "equip_weapon_param_xml_path", text="")
+        weapon_xml = resolve_equip_weapon_xml_path(settings, stan)
+        if weapon_xml:
+            layout.label(text=f"Using: {weapon_xml.name}", icon="CHECKMARK")
+
         chr_dirs = _iter_chr_directories(settings)
         if chr_dirs:
             count = sum(1 for d in chr_dirs for _ in d.glob("c*.chrbnd*"))
@@ -99,12 +111,26 @@ class StanCharactersPanel(_StanToolsPanel):
 
     def draw(self, context):
         layout = self.layout
+        stan = context.scene.stan_tools_settings
+
+        box = layout.box()
+        box.label(text="Player Character (weapon testing)", icon="USER")
+        row = box.row(align=True)
+        row.prop(stan, "player_character_gender", text="")
+        row.operator(StanLoadPlayerCharacter.bl_idname, icon="IMPORT")
+        if is_player_character_loaded(context):
+            gender = stan.player_character_gender.lower()
+            box.label(text=f"Player c0000 loaded ({gender})", icon="CHECKMARK")
+        else:
+            box.label(text="Not loaded — required for Weapons tab", icon="ERROR")
+        box.label(text="Load once; equipping weapons does not reload the body")
+
+        layout.separator()
         layout.label(text="Search by name or c#### id, then import the model")
         layout.operator(StanSearchCharacterToImport.bl_idname, icon="VIEWZOOM")
         layout.label(text="Load animation (uses last imported c####):")
         layout.operator(StanSearchCharacterAnimation.bl_idname, icon="ANIM")
 
-        stan = context.scene.stan_tools_settings
         box = layout.box()
         box.label(text="NPC Param Selection (mesh visibility)", icon="MODIFIER")
         if stan.character_model:
@@ -116,6 +142,58 @@ class StanCharactersPanel(_StanToolsPanel):
         row.operator(StanApplyNpcParamDrawMask.bl_idname, icon="HIDE_OFF")
         row.operator(StanShowAllCharacterMeshes.bl_idname, icon="RESTRICT_VIEW_OFF")
         box.label(text="NPC Param applies on selection; Apply re-runs if needed")
+
+
+class StanWeaponsPanel(_StanToolsPanel):
+    bl_label = "Weapons"
+    bl_idname = "VIEW_PT_stan_tools_weapons"
+
+    @classmethod
+    def poll(cls, context):
+        from soulstruct.blender.general.properties import SoulstructSettings
+
+        settings = SoulstructSettings.from_context(context)
+        return settings.has_import_dir_path("parts") and is_player_character_loaded(context)
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.soulstruct_settings
+        stan = context.scene.stan_tools_settings
+
+        if is_player_character_loaded(context):
+            layout.label(text=f"Player: c0000 ({stan.player_character_gender.lower()}) ready", icon="CHECKMARK")
+        else:
+            layout.label(text="Load player character in Characters tab first", icon="ERROR")
+            return
+
+        layout.label(text="Search by EquipParamWeapon row id or name")
+        layout.operator(StanSearchWeaponToImport.bl_idname, icon="VIEWZOOM")
+
+        layout.label(text="EquipParamWeapon (wepmotionCategory):")
+        layout.prop(stan, "equip_weapon_param_xml_path", text="")
+        xml_path = resolve_equip_weapon_xml_path(settings, stan)
+        if xml_path:
+            layout.label(text=f"Using: {xml_path.name}", icon="CHECKMARK")
+        elif stan.equip_weapon_param_xml_path or settings.project_root_path:
+            layout.label(text="EquipParamWeapon.param.xml not found", icon="ERROR")
+
+        if stan.weapon_stem:
+            layout.label(text=f"Active weapon: {stan.weapon_stem}", icon="OUTLINER_OB_ARMATURE")
+            if stan.weapon_row_id:
+                layout.label(text=f"Row id: {stan.weapon_row_id}")
+
+        box = layout.box()
+        box.label(text="c0000 attack animations", icon="ANIM")
+        row = box.row(align=True)
+        row.prop(stan, "c0000_sub_anibnd", text="")
+        row.operator(StanRefreshC0000SubAnibndList.bl_idname, text="", icon="FILE_REFRESH")
+        box.prop(stan, "weapon_attack_slot", text="Attack Slot")
+        box.operator(StanLoadWeaponAttackAnimation.bl_idname, text="Load Weapon Attack", icon="ANIM")
+
+        parts_dirs = _iter_parts_directories(settings)
+        if parts_dirs:
+            count = sum(1 for d in parts_dirs for _ in d.glob("WP_A_*.partsbnd*"))
+            layout.label(text=f"parts\\ found: {count} weapon binder(s)", icon="CHECKMARK")
 
 
 class StanAnimationPanel(_StanToolsPanel):

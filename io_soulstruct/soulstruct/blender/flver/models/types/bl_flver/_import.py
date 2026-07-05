@@ -211,6 +211,13 @@ def _set_submesh_props(
     mesh_bl_material_indices: list[int],
     ignore_default_bone_indices: bool,
 ):
+    if not flver_meshes:
+        # Skeleton-only FLVER (e.g. ER c0000, mesh-less AM_M_0000 PARTSBND).
+        bl_flver.type_properties.global_is_dynamic = False
+        bl_flver.type_properties.global_default_bone_index = 0
+        bl_flver.type_properties.global_face_set_count = 0
+        return
+
     # Set sensible global submesh properties and determine if we need per-submesh props.
     create_per_submesh_props = False
     if all(mesh.is_dynamic for mesh in flver_meshes):
@@ -546,6 +553,18 @@ def _create_bl_bones(
     else:
         # All static meshes.
         bl_bone_data_type = FLVERBoneDataType.CUSTOM
+
+    # Opt-in: force EDIT bone data for skeleton-only character FLVERs (e.g. c0000) so the true
+    # rest pose is written to EditBones (correct dummy placement + animation). Default off.
+    if (
+        getattr(command.import_settings, "force_edit_bones", False)
+        and command.flver.bones
+        and bl_bone_data_type == FLVERBoneDataType.CUSTOM
+    ):
+        command.operator.info(
+            f"Forcing EDIT bone data for skeleton-only FLVER '{command.name}' (force_edit_bones)."
+        )
+        bl_bone_data_type = FLVERBoneDataType.EDIT
 
     # We need edit mode to create `EditBones` below.
     command.context.view_layer.objects.active = armature

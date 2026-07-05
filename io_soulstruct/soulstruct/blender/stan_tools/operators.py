@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = [
     "AutoDetectGameDirectory",
     "StanRefreshNpcParamList",
+    "StanRefreshC0000SubAnibndList",
     "StanApplyNpcParamDrawMask",
     "StanShowAllCharacterMeshes",
     "StanApplySceneLighting",
@@ -56,6 +57,23 @@ class AutoDetectGameDirectory(LoggingOperator):
             self.info(f"Set mod folder: {mod_path}")
 
         return {"FINISHED"}
+
+
+class StanRefreshC0000SubAnibndList(LoggingOperator):
+    """Reload c0000 sub-ANIBND choices from c0000.anibnd."""
+
+    bl_idname = "stan_tools.refresh_c0000_sub_anibnd_list"
+    bl_label = "Refresh c0000 Sub-ANIBND List"
+    bl_description = "Reload c0000 sub-ANIBND binders registered in c0000.anibnd"
+
+    def execute(self, context):
+        stan = context.scene.stan_tools_settings
+        if stan.refresh_c0000_sub_anibnd_list(context):
+            self.info("Loaded c0000 sub-ANIBND list.")
+            return {"FINISHED"}
+        return self.warning(
+            "c0000.anibnd not found. Set Game Root with unpacked chr/c0000.anibnd for weapon attack preview."
+        )
 
 
 class StanRefreshNpcParamList(LoggingOperator):

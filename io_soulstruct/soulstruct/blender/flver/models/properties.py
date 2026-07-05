@@ -454,6 +454,14 @@ class FLVERImportSettings(SoulstructPropertyGroup):
         default="HASHED",
     )
 
+    force_edit_bones: bpy.props.BoolProperty(
+        name="Force Edit Bones (Skeleton)",
+        description="Force bone rest pose to be written to EditBones even when the FLVER has no dynamic meshes "
+                    "(e.g. skeleton-only character FLVERs like c0000). Needed for correct dummy placement and "
+                    "armature animation of mesh-less skeletons. Leave off for Map Pieces",
+        default=False,
+    )
+
 
 class FLVERExportSettings(SoulstructPropertyGroup):
     """Common FLVER export settings. Drawn manually in operator browser windows."""

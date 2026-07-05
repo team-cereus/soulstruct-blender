@@ -191,12 +191,17 @@ CLASSES = (
     # region Stan's Tools
     StanSetupPanel,
     StanCharactersPanel,
+    StanWeaponsPanel,
     StanAnimationPanel,
     StanViewportPanel,
     AutoDetectGameDirectory,
     StanSearchCharacterToImport,
     StanSearchCharacterAnimation,
+    StanSearchWeaponToImport,
+    StanLoadWeaponAttackAnimation,
+    StanLoadPlayerCharacter,
     StanRefreshNpcParamList,
+    StanRefreshC0000SubAnibndList,
     StanApplyNpcParamDrawMask,
     StanShowAllCharacterMeshes,
     StanApplySceneLighting,
@@ -749,6 +754,13 @@ def register():
     bpy.types.TOPBAR_MT_file_import.append(havok_menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(havok_menu_func_export)
 
+    from soulstruct.blender.stan_tools.debug_log import ensure_stan_tools_file_logging
+
+    for scene in bpy.data.scenes:
+        if getattr(scene, "soulstruct_settings", None) is not None:
+            ensure_stan_tools_file_logging(scene.soulstruct_settings.enable_debug_logging)
+            break
+
 
 def unregister():
     for cls in reversed(CLASSES):
@@ -795,6 +807,10 @@ def unregister():
     for handler in DEPSGRAPH_UPDATE_POST_HANDLERS:
         bpy.app.handlers.depsgraph_update_post.remove(handler)
     DEPSGRAPH_UPDATE_POST_HANDLERS.clear()
+
+    from soulstruct.blender.stan_tools.debug_log import ensure_stan_tools_file_logging
+
+    ensure_stan_tools_file_logging(False)
 
 
 if __name__ == "__main__":

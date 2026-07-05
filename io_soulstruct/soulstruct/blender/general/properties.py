@@ -54,9 +54,14 @@ def _update_log_level(self: SoulstructSettings, context: bpy.types.Context):
     """Set logging level of base 'soulstruct' logger to either DEBUG or INFO."""
     logger = logging.getLogger("soulstruct")
     if not logger.hasHandlers():
-        return
-    for handler in logger.handlers:
-        handler.setLevel(logging.DEBUG if self.enable_debug_logging else logging.INFO)
+        pass
+    else:
+        for handler in logger.handlers:
+            handler.setLevel(logging.DEBUG if self.enable_debug_logging else logging.INFO)
+
+    from soulstruct.blender.stan_tools.debug_log import ensure_stan_tools_file_logging
+
+    ensure_stan_tools_file_logging(self.enable_debug_logging)
 
 
 class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyGroup` (unnecessary)
