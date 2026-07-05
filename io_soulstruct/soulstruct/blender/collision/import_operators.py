@@ -222,10 +222,8 @@ class ImportHKXMapCollisionWithBinderChoice(LoggingOperator):
 
     def execute(self, context):
         model_name = f"h{self.choices_enum.split('.')[0]}"
-        hi_collision, lo_collision = self.both_res_hkxbhd.get_both_hkx(
+        hi_collision, lo_collision = self.both_res_hkxbhd.get_both_hkx_allow_missing(
             model_name,
-            allow_missing_hi=True,
-            allow_missing_lo=True,
         )
 
         try:
