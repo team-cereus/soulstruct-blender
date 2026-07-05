@@ -1,0 +1,30 @@
+---
+description: Team Cereus — canonical modding team identity and cross-project map for soulstruct-blender
+alwaysApply: true
+---
+
+# Team Cereus (canonical modding team)
+
+**Team Cereus** is the canonical name for our Nightreign-first, Elden Ring–adjacent modding work. Use **"Team Cereus"** or **"Cereus"** in docs, agent replies, and commit scopes—not ad-hoc labels unless the user specifies otherwise.
+
+Related GitHub org: [team-cereus](https://github.com/team-cereus). **This repo:** [team-cereus/soulstruct-blender](https://github.com/team-cereus/soulstruct-blender).
+
+## This repo's role
+
+Blender side of the Team Cereus pipeline: **character / weapon / animation preview** and **FLVER / HKX editing** for Elden Ring and Nightreign. Custom **Stan's Tools** panels live under `io_soulstruct/soulstruct/blender/stan_tools/`. Shareable installer: `build_cereus_addon.ps1` → `dist/soulstruct-blender-cereus-<version>-<date>.zip`.
+
+## Sibling projects
+
+| Project | Location | Role |
+|---------|----------|------|
+| **souls-param** | `S:\souls-script-kt` | Kotlin toolkit: typed param patching (`.nr.kts` / `.er.kts`), mod-merge, ME3 mod-installer, HKS bytecode DSL. Mod packages (`modPackage { cereusDebug() … }`) and `regulation.bin` work live here. Cursor rules: `S:\souls-script-kt\.cursor\rules\`. |
+| **Nightreign: Eclipse** | `S:\the-heolstor-files` | Collaborative Nightreign mod **design** docs with designer Heolstor. Source of truth: `source/nightlord-files.md`; distilled docs in `characters/`, `weapons/`, `bosses/`, `dormant-powers/`, `items/`, `gameplay/`; feasibility tags `[easy]` / `[medium]` / `[hard]` / `[engine]` / `[unclear]`; versioning in `VERSIONING.md`; triage in `low-hanging-fruit.md`. **Blender / animation / model work for Eclipse content happens in this repo.** |
+| **fromsoftware-rs** | `S:\fromsoftware-rs` | Rust game introspection + `cereus_debug.dll` placement overlay. Build: `S:\souls-script-kt\scripts\tools\build-cereus-debug.ps1`. In-game: **F1** toggles overlay; **F5** marks placement coords for Smithbox. |
+| **DSAnimStudio (DSAS)** | `S:\_modding\tools\DSAnimStudio` | Parity reference for character assembly, skeleton mapping, dummy transforms, weapon attach (`NewChrAsm`, `NewSkeletonMapper`, `NewDummyPolyManager`). When Blender behavior differs from in-game, check DSAS first. |
+
+## Agent defaults
+
+- Prefer **Team Cereus** naming in new docs and commit messages (see `.cursor/rules/commit-messages.mdc`).
+- Param / regulation / shop / FMG / HKS questions → point to `S:\souls-script-kt` and its rules; do not guess param layouts here.
+- Eclipse design questions → point to `S:\the-heolstor-files`; implementation scripts eventually land in `S:\the-heolstor-files\scripts\` (`.nr.kts` via souls-param).
+- Map / object placement → cereus_debug overlay + Smithbox; build DLL from souls-script-kt.

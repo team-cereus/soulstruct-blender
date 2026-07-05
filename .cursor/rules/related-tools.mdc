@@ -1,0 +1,38 @@
+---
+description: External FromSoftware modding tools and where they live on this machine — Smithbox, WitchyBND, DSAS, ME3, hksc, and more
+alwaysApply: false
+---
+
+# Related Tools (local installs)
+
+Absolute paths on this machine. Prefer these over outdated wiki defaults (Yabber, Yapped, DS Map Studio).
+
+| Tool | Path | Role |
+|------|------|------|
+| **Smithbox** | `S:\Smithbox` | Param / map / model editor (successor to DS Map Studio / Yapped) |
+| **WitchyBND** | `S:\WitchyBND` | BND / DCX archive (un)packing (successor to Yabber) |
+| **DSAnimStudio (DSAS)** | `S:\_modding\tools\DSAnimStudio` | **Source + parity reference** for character assembly, skeleton mapping, dummy transforms, weapon attach (`NewChrAsm`, `NewSkeletonMapper`, `NewDummyPolyManager`). Notes/materials also at `S:\the-heolstor-files\dsas` |
+| **Mod Engine 3 (ME3)** | (runtime loader) | Mod loading in-game; installers built from `S:\souls-script-kt` (`mod-installer` module) |
+| **hksc** | `S:\hksc` | HavokScript compiler |
+| **DSLuaDecompiler** | `S:\DSLuaDecompiler` | HKS / Lua decompiler |
+| **fromsoftware-rs** | `S:\fromsoftware-rs` | Rust introspection + cereus_debug placement overlay |
+| **Elden Ring** | `S:\SteamLibrary\steamapps\common\ELDEN RING\Game` | Game install |
+| **Nightreign** | `S:\SteamLibrary\steamapps\common\ELDEN RING NIGHTREIGN` | Game install |
+
+## In-repo libraries (git submodules)
+
+| Library | Path | Role |
+|---------|------|------|
+| **soulstruct** | `io_soulstruct_lib/soulstruct/` | Core Python library: binders, FLVER, MSB, params, etc. |
+| **soulstruct-havok** | `io_soulstruct_lib/soulstruct-havok/` | Havok / HKX / animation support |
+
+Submodule changes: commit **inside the submodule first**, then bump the pointer in this repo (`chore(submodules): …` — see `.cursor/rules/commit-messages.mdc`).
+
+## Cross-project tooling
+
+| Need | Where |
+|------|-------|
+| Typed param patches, mod packages, HKS DSL | `S:\souls-script-kt` |
+| Eclipse mod design docs | `S:\the-heolstor-files` |
+| Blender add-on + Stan's Tools | **this repo** (`io_soulstruct/`) |
+| Wiki KB (discydump) | `S:\souls-script-kt\discydump\` |

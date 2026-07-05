@@ -61,4 +61,9 @@ Use **WitchyBND** to unpack/repack binders externally.
 
 ## Deeper NR param work
 
-Shops, SpEffects, `regulation.bin`, and other NR-specific param lessons live in `S:\souls-script-kt\.cursor\rules\nightreign-modding-lessons.mdc` — consult when doing param work.
+Shops, SpEffects, `regulation.bin`, and other NR-specific param lessons live in `S:\souls-script-kt\.cursor\rules\nightreign-modding-lessons.mdc` — consult when doing param work. Highlights:
+
+- **ShopLineupParam:** day-specific ID ranges (1000s / 2000s / 3000s); new entries must be **contiguous** after the last row in a range; clear `eventFlag_forStock` / `eventFlag_forRelease` when copying rows.
+- **regulation.bin serialization:** prefer `writeAppendingRows` / `writePreservingLayout` over full rewrites; validate row counts after every write.
+- **SpEffectParam:** `spCategory` controls stacking/refresh; prefer `copyRow` from vanilla templates over `addRow`.
+- **HKS:** behavior gating via `env(GetSpEffectID, id)`; SpEffect delivery differs between bullet ticks and AtkParam.
