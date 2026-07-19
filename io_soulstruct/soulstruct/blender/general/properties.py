@@ -222,6 +222,13 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
         default="",
         subtype="DIR_PATH",
     )
+
+    nightreign_unpack_staging_str: bpy.props.StringProperty(
+        name="Nightreign Unpack Staging",
+        description="Optional extra import root with UXM/Smithbox loose files (map, chr, parts)",
+        default=r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack",
+        subtype="DIR_PATH",
+    )
     # endregion
 
     soulstruct_project_root_str: bpy.props.StringProperty(
@@ -449,6 +456,11 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
         mod_root_str = getattr(self, prop_name, "")
         return Path(mod_root_str) if mod_root_str else None
 
+    @property
+    def nightreign_unpack_staging_path(self) -> Path | None:
+        staging_str = getattr(self, "nightreign_unpack_staging_str", "")
+        return Path(staging_str) if staging_str else None
+
     def auto_set_game(self):
         """Determine `game` enum value from `game_directory`."""
         if not self.game_root_path:
@@ -465,6 +477,13 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
         if self.prefer_import_from_project:
             return self.project_root, self.game_root
         return self.game_root, self.project_root
+
+    def all_import_roots(self) -> tuple[GameStructure, ...]:
+        """Return import roots plus Nightreign unpack staging when configured."""
+        roots: list[GameStructure | None] = list(self.import_roots)
+        if self.is_game(NIGHTREIGN) and is_path_and_dir(self.nightreign_unpack_staging_path):
+            roots.append(GameStructure(self, self.nightreign_unpack_staging_path))
+        return tuple(root for root in roots if root is not None)
 
     def get_first_existing_import_root(self) -> Path | None:
         """Return the first existing import root directory, or `None` if neither is set/exists."""

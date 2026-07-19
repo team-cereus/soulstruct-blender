@@ -6,6 +6,7 @@ __all__ = [
     "StanWeaponsPanel",
     "StanAnimationPanel",
     "StanViewportPanel",
+    "StanMapPoiPanel",
     "AutoDetectGameDirectory",
     "StanSearchCharacterToImport",
     "StanSearchCharacterAnimation",
@@ -19,10 +20,20 @@ __all__ = [
     "StanShowAllCharacterMeshes",
     "StanApplySceneLighting",
     "StanRemoveSceneLighting",
+    "StanRefreshMapSeedList",
+    "StanImportPoiMarkers",
+    "StanClearPoiMarkers",
+    "StanFramePoiMarkers",
+    "StanImportSelectedPoiMapTile",
+    "StanPoiCatalogPrev",
+    "StanPoiCatalogNext",
+    "StanPoiCatalogFrame",
+    "StanPoiCatalogBrowseModal",
 ]
 
 from .gui import *
 from .operators import *
+from .poi_operators import *
 from .properties import StanToolsSettings
 from .character_search import StanSearchCharacterToImport
 from .animation_search import StanSearchCharacterAnimation

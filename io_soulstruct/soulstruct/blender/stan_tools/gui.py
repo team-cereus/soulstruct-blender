@@ -6,6 +6,7 @@ __all__ = [
     "StanWeaponsPanel",
     "StanAnimationPanel",
     "StanViewportPanel",
+    "StanMapPoiPanel",
 ]
 
 from pathlib import Path
@@ -14,6 +15,7 @@ import bpy
 
 from soulstruct.blender.bpy_base.panel import SoulstructPanel
 from soulstruct.blender.general.properties import SoulstructSettings
+from soulstruct.games import NIGHTREIGN
 from soulstruct.blender.stan_tools.character_search import _iter_chr_directories
 from soulstruct.blender.animation.export_operators import ExportCharacterHKXAnimation
 
@@ -31,7 +33,20 @@ from .operators import (
     StanApplySceneLighting,
     StanRemoveSceneLighting,
 )
+from .poi_operators import (
+    StanRefreshMapSeedList,
+    StanImportPoiMarkers,
+    StanClearPoiMarkers,
+    StanFramePoiMarkers,
+    StanImportSelectedPoiMapTile,
+    StanPoiCatalogPrev,
+    StanPoiCatalogNext,
+    StanPoiCatalogFrame,
+    StanPoiCatalogBrowseModal,
+)
+from .poi_catalog import catalog_tile_count, current_catalog_tile
 from .npc_param import _resolve_npc_param_xml_path
+from .regulation_bin import resolve_regulation_bin_dir
 from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
 
@@ -84,6 +99,14 @@ class StanSetupPanel(_StanToolsPanel):
             layout.label(text=f"Using: {xml_path.name}", icon="CHECKMARK")
         elif stan.npc_param_xml_path or settings.project_root_path:
             layout.label(text="NpcParam.param.xml not found", icon="ERROR")
+
+        layout.label(text="Regulation Bin (POI / params):")
+        layout.prop(stan, "regulation_bin_dir", text="")
+        reg_dir = resolve_regulation_bin_dir(settings, stan)
+        if reg_dir:
+            layout.label(text=f"Using: {reg_dir.name}", icon="CHECKMARK")
+        elif stan.regulation_bin_dir or settings.project_root_path:
+            layout.label(text="regulation-bin not found", icon="ERROR")
 
         layout.label(text="EquipParamWeapon (weapon attacks):")
         layout.prop(stan, "equip_weapon_param_xml_path", text="")
@@ -255,3 +278,94 @@ class StanViewportPanel(_StanToolsPanel):
             layout.label(text="Scene lighting: ON", icon="CHECKMARK")
         else:
             layout.label(text="Scene lighting: OFF", icon="BLANK1")
+
+
+class StanMapPoiPanel(_StanToolsPanel):
+    bl_label = "Map POIs"
+    bl_idname = "VIEW_PT_stan_tools_map_pois"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        settings = SoulstructSettings.from_context(context)
+        return settings.is_game(NIGHTREIGN)
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.soulstruct_settings
+        stan = context.scene.stan_tools_settings
+
+        layout.label(
+            text="Seed Layout = procedural POI placement on overworld; "
+            "POI Tile Catalog = browse slot map meshes (m30_30, m46_51, …)",
+            icon="EMPTY_AXIS",
+        )
+
+        reg_dir = resolve_regulation_bin_dir(settings, stan)
+        if reg_dir:
+            layout.label(text=f"regulation-bin: {reg_dir}", icon="CHECKMARK")
+        else:
+            layout.label(text="regulation-bin not found", icon="ERROR")
+            layout.label(
+                text="Set Game Root to unpacked .../Game (contains regulation-bin/)",
+                icon="INFO",
+            )
+
+        staging = settings.nightreign_unpack_staging_path
+        if staging and staging.is_dir():
+            layout.label(text=f"Unpack staging: {staging}", icon="CHECKMARK")
+        else:
+            layout.label(text="Unpack staging not set or missing", icon="INFO")
+            layout.label(
+                text="Soulstruct Settings → Unpack Staging (mapstudio MSB fallback)",
+                icon="BLANK1",
+            )
+
+        layout.prop(stan, "poi_display_mode", text="")
+
+        if stan.poi_display_mode == "SEED_LAYOUT":
+            layout.prop(stan, "poi_apply_grid_offset")
+            row = layout.row(align=True)
+            row.prop(stan, "map_seed_id", text="Seed")
+            row.operator(StanRefreshMapSeedList.bl_idname, text="", icon="FILE_REFRESH")
+        elif stan.poi_display_mode == "POI_TILE_CATALOG":
+            layout.label(
+                text="One tile at a time at origin; use Prev/Next or Browse mode",
+                icon="INFO",
+            )
+            total = catalog_tile_count(stan)
+            if total:
+                tile = current_catalog_tile(stan)
+                tile_str = tile[1] if tile else "-"
+                layout.label(text=f"Tile {stan.poi_catalog_index + 1}/{total}: {tile_str}")
+                row = layout.row(align=True)
+                row.operator(StanPoiCatalogPrev.bl_idname, text="Prev", icon="TRIA_LEFT")
+                row.operator(StanPoiCatalogNext.bl_idname, text="Next", icon="TRIA_RIGHT")
+                row.operator(StanPoiCatalogFrame.bl_idname, text="Frame", icon="ZOOM_SELECTED")
+                row.operator(StanPoiCatalogBrowseModal.bl_idname, text="Browse", icon="HAND")
+            layout.prop(stan, "poi_catalog_isolate_view")
+            layout.prop(stan, "poi_catalog_skip_empty")
+        else:
+            layout.prop(stan, "poi_apply_grid_offset")
+
+        layout.prop(stan, "poi_frame_on_import")
+
+        if stan.poi_display_mode in {"SEED_LAYOUT", "POI_TILE_CATALOG"}:
+            layout.prop(
+                stan,
+                "poi_import_map_tiles",
+                text="Import Map Tiles (FLVER or mapstudio MSB)",
+            )
+
+        row = layout.row(align=True)
+        row.operator(StanImportPoiMarkers.bl_idname, icon="IMPORT")
+        row.operator(StanClearPoiMarkers.bl_idname, icon="TRASH")
+
+        row = layout.row(align=True)
+        row.operator(StanFramePoiMarkers.bl_idname, icon="ZOOM_SELECTED")
+        if stan.poi_display_mode != "POI_TILE_CATALOG":
+            row.operator(StanImportSelectedPoiMapTile.bl_idname, icon="MESH_CUBE")
+
+        if stan.poi_display_mode != "POI_TILE_CATALOG":
+            layout.label(text="POIs use overworld coords — use Frame POI View if empty viewport", icon="INFO")
+            layout.label(text="Markers use game→Blender coords (m60 grid origin 46, 49)")

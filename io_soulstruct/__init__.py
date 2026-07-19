@@ -194,6 +194,7 @@ CLASSES = (
     StanWeaponsPanel,
     StanAnimationPanel,
     StanViewportPanel,
+    StanMapPoiPanel,
     AutoDetectGameDirectory,
     StanSearchCharacterToImport,
     StanSearchCharacterAnimation,
@@ -206,6 +207,15 @@ CLASSES = (
     StanShowAllCharacterMeshes,
     StanApplySceneLighting,
     StanRemoveSceneLighting,
+    StanRefreshMapSeedList,
+    StanImportPoiMarkers,
+    StanClearPoiMarkers,
+    StanFramePoiMarkers,
+    StanImportSelectedPoiMapTile,
+    StanPoiCatalogPrev,
+    StanPoiCatalogNext,
+    StanPoiCatalogFrame,
+    StanPoiCatalogBrowseModal,
     # endregion
 
     # region FLVER / Materials / Textures

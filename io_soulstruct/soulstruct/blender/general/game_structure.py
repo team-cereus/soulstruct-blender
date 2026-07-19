@@ -125,6 +125,13 @@ class GameStructure:
         relative_msb_path = self.settings.get_relative_msb_path(map_stem)  # handles smart versioning
         if not relative_msb_path:
             return None
+        if self.settings.is_er_family():
+            msb_file = relative_msb_path.name
+            for sub in ("map/MapStudio", "map/mapstudio"):
+                path = self.get_file_path(Path(sub, msb_file), if_exist=if_exist)
+                if path is not None:
+                    return path
+            return None
         return self.get_file_path(relative_msb_path, if_exist=if_exist)
 
     def _process_file_dcx_path(self, path: Path, dcx_type: DCXType | None) -> Path:

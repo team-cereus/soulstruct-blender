@@ -16,6 +16,8 @@ from .player_character import is_player_character_loaded
 from .scene_lighting import is_scene_lighting_active
 from .weapon_anim import list_c0000_sub_anibnd_stems
 from .weapon_attack_slots import ATTACK_SLOTS
+from .regulation_bin import resolve_regulation_bin_dir
+from .nr_poi import load_map_seeds
 
 
 def _weapon_attack_slot_items(self, context) -> list[tuple[str, str, str]]:
@@ -33,6 +35,10 @@ def _c0000_sub_anibnd_enum_items(self, context) -> list[tuple[str, str, str]]:
     return StanToolsSettings._c0000_sub_anibnd_items
 
 
+def _map_seed_enum_items(self, context) -> list[tuple[str, str, str]]:
+    return StanToolsSettings._map_seed_items
+
+
 def _on_npc_param_row_changed(self, context: bpy.types.Context) -> None:
     """Apply draw mask when the user picks a row (skipped during import list refresh)."""
     if StanToolsSettings._suppress_npc_param_update:
@@ -47,7 +53,84 @@ class StanToolsSettings(SoulstructPropertyGroup):
 
     _npc_param_items: list[tuple[str, str, str]] = [("", "<none>", "")]
     _c0000_sub_anibnd_items: list[tuple[str, str, str]] = [("", "<none>", "")]
+    _map_seed_items: list[tuple[str, str, str]] = [("", "<none>", "")]
     _suppress_npc_param_update: bool = False
+
+    regulation_bin_dir: bpy.props.StringProperty(
+        name="Regulation Bin Dir",
+        description=(
+            "Optional folder with Witchy *.param.xml dumps (e.g. souls-script-kt/param-nightreign/regulation-bin). "
+            "If empty, searches Project Root/regulation-bin/ and Game Root"
+        ),
+        subtype="DIR_PATH",
+        default="",
+    )
+
+    poi_display_mode: bpy.props.EnumProperty(
+        name="POI Display",
+        description="Which Nightreign POI data to import as Empty markers",
+        items=[
+            ("ATTACH_POINTS", "Attach Points", "All world attach slots from SmallBaseAndSpotAttachPoint"),
+            ("SEED_LAYOUT", "Seed Layout", "Procedural POI placements for the selected map seed"),
+            ("POI_TILE_CATALOG", "POI Tile Catalog", "Browse POI slot map tiles (m30_30, m46_51, …) one at a time at origin"),
+            ("DEFINES_ONLY", "Defines Only", "POI type definitions as markers at origin (reference)"),
+        ],
+        default="ATTACH_POINTS",
+    )
+
+    map_seed_id: bpy.props.EnumProperty(
+        name="Map Seed",
+        description="LotResultPlayAreaParam seed controlling procedural POI layout",
+        items=_map_seed_enum_items,
+    )
+
+    poi_apply_grid_offset: bpy.props.BoolProperty(
+        name="Apply Grid Offset",
+        description="Convert attach local coords to overworld position using m60 grid origin (46, 49)",
+        default=True,
+    )
+
+    poi_frame_on_import: bpy.props.BoolProperty(
+        name="Frame POI View on Import",
+        description="Frame the 3D viewport on imported POI markers (overworld coords are far from origin)",
+        default=True,
+    )
+
+    poi_import_map_tiles: bpy.props.BoolProperty(
+        name="Import POI Tile FLVERs",
+        description=(
+            "Load POI slot map piece geometry (m30_30, m46_51, …) from unpacked map/ in Game Root. "
+            "Seed layout: one mesh per unique tile at each POI attach position. "
+            "Tile catalog: one tile at a time at origin (Prev/Next to browse)"
+        ),
+        default=True,
+    )
+
+    poi_catalog_tile_ids: bpy.props.StringProperty(
+        name="POI Catalog Tile IDs",
+        description="Internal comma-separated SmallBaseMapVariationParam tile ids for catalog browse",
+        default="",
+        options={"HIDDEN"},
+    )
+
+    poi_catalog_index: bpy.props.IntProperty(
+        name="POI Catalog Index",
+        description="Current tile index in the POI tile catalog browser",
+        default=0,
+        min=0,
+    )
+
+    poi_catalog_isolate_view: bpy.props.BoolProperty(
+        name="Isolate Catalog View",
+        description="Hide other scene collections while browsing the POI tile catalog",
+        default=True,
+    )
+
+    poi_catalog_skip_empty: bpy.props.BoolProperty(
+        name="Skip Tiles Without Map Files",
+        description="Prev/Next skip variation tiles with no unpacked mapbnd under Game/map/",
+        default=False,
+    )
 
     equip_weapon_param_xml_path: bpy.props.StringProperty(
         name="EquipParamWeapon XML",
@@ -179,6 +262,44 @@ class StanToolsSettings(SoulstructPropertyGroup):
 
     def _set_c0000_sub_anibnd(self, stem: str) -> None:
         self["c0000_sub_anibnd"] = stem
+
+    def _set_map_seed_id(self, seed_id: str) -> None:
+        self["map_seed_id"] = seed_id
+
+    def refresh_map_seed_list(
+        self,
+        context: bpy.types.Context,
+        reg_dir=None,
+    ) -> bool:
+        """Rebuild map seed enum from LotResultPlayAreaParam."""
+        from pathlib import Path
+
+        settings = context.scene.soulstruct_settings
+        if reg_dir is None:
+            reg_dir = resolve_regulation_bin_dir(settings, self)
+        if reg_dir is None:
+            StanToolsSettings._map_seed_items = [
+                ("", "<regulation-bin not found>", "Set Regulation Bin Dir or Project Root"),
+            ]
+            self._set_map_seed_id("")
+            return False
+
+        reg_path = Path(reg_dir)
+        seeds = load_map_seeds(reg_path)
+        if not seeds:
+            StanToolsSettings._map_seed_items = [
+                ("", "<no seeds>", "LotResultPlayAreaParam.param.xml missing or empty"),
+            ]
+            self._set_map_seed_id("")
+            return False
+
+        StanToolsSettings._map_seed_items = [
+            (str(s.seed_id), s.label, f"Pattern {s.pattern_id}") for s in seeds
+        ]
+        valid = {item[0] for item in StanToolsSettings._map_seed_items}
+        if self.map_seed_id not in valid:
+            self._set_map_seed_id(StanToolsSettings._map_seed_items[0][0])
+        return True
 
     def refresh_c0000_sub_anibnd_list(self, context: bpy.types.Context) -> bool:
         """Rebuild c0000 sub-ANIBND enum from base c0000.anibnd txt entries."""

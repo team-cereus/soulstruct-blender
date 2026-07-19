@@ -16,7 +16,7 @@ from soulstruct.base.maps.navmesh import BaseNVMBND
 from soulstruct.containers.tpf import TPFPlatform
 from soulstruct.games import *
 
-from soulstruct import demonssouls, darksouls1ptde, darksouls1r, bloodborne, darksouls3, eldenring
+from soulstruct import demonssouls, darksouls1ptde, darksouls1r, bloodborne, darksouls3, eldenring, nightreign
 
 from soulstruct.havok import fromsoft as hk_fromsoft
 from soulstruct.havok.enums import HavokModule
@@ -236,7 +236,7 @@ BLENDER_GAME_CONFIG = {
         flver_default_version=FLVERVersion.Nightreign,
         uses_matbin=True,
         matdef_class=eldenring.models.MatDef,
-        msb_class=eldenring.maps.MSB,
+        msb_class=nightreign.maps.MSB,
         map_constants=eldenring.maps.constants,
         havok_module=HavokModule.hk2018,
         skeleton_hkx_class=hk_fromsoft.eldenring.SkeletonHKX,

@@ -16,7 +16,9 @@ import bpy
 
 from soulstruct.blender.general.properties import SoulstructSettings
 from soulstruct.blender.utilities import LoggingOperator
+from soulstruct.games import NIGHTREIGN
 
+from .regulation_bin import auto_set_regulation_bin_dir
 from .steam_paths import detect_game_root
 from .mesh_mask_visibility import show_all_character_meshes
 from .npc_param import find_character_armature, _resolve_npc_param_xml_path
@@ -55,6 +57,17 @@ class AutoDetectGameDirectory(LoggingOperator):
             mod_path = root / "mod"
             setattr(settings, mod_prop, str(mod_path))
             self.info(f"Set mod folder: {mod_path}")
+
+        if settings.is_game(NIGHTREIGN) and not settings.nightreign_unpack_staging_str:
+            default_staging = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack")
+            if default_staging.is_dir():
+                settings.nightreign_unpack_staging_str = str(default_staging)
+                self.info(f"Set unpack staging: {default_staging}")
+
+        stan = context.scene.stan_tools_settings
+        reg_dir = auto_set_regulation_bin_dir(stan, settings)
+        if reg_dir:
+            self.info(f"Set regulation-bin: {reg_dir}")
 
         return {"FINISHED"}
 

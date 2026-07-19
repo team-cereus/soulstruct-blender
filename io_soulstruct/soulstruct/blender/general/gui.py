@@ -13,7 +13,7 @@ __all__ = [
 ]
 
 import bpy
-from soulstruct.games import DEMONS_SOULS
+from soulstruct.games import DEMONS_SOULS, NIGHTREIGN
 
 from soulstruct.blender.bpy_base.panel import SoulstructPanel
 from soulstruct.blender.types import SoulstructType
@@ -38,6 +38,9 @@ class _BaseGlobalSettingsPanel(SoulstructPanel):
             layout.prop(settings, settings.get_project_root_prop_name(), text="")
             layout.label(text="Mod Folder:")
             layout.prop(settings, settings.get_mod_root_prop_name(), text="")
+            if settings.is_game(NIGHTREIGN):
+                layout.label(text="Unpack Staging:")
+                layout.prop(settings, "nightreign_unpack_staging_str", text="")
         else:
             layout.label(text="Unsupported Game")
 

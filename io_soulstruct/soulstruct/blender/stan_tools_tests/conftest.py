@@ -7,5 +7,5 @@ def pytest_configure(config):
     import sys
     from unittest.mock import MagicMock
 
-    for _name in ("bpy", "bpy.types", "bpy.props", "bpy.ops"):
+    for _name in ("bpy", "bpy.types", "bpy.props", "bpy.ops", "mathutils"):
         sys.modules.setdefault(_name, MagicMock())
