@@ -26,6 +26,7 @@ from soulstruct.games import NIGHTREIGN
 
 from ..base.operators import LoggingOperator
 from ..base.register import io_soulstruct_operator
+from ..general.matdefs import clear_cached_matdefs
 from ..general.properties import SoulstructSettings
 from .steam_paths import detect_game_root
 
@@ -161,19 +162,26 @@ class StanUnpackNightreign(LoggingOperator):
             game_root = detect_game_root(NIGHTREIGN.variable_name)
         if not game_root or not (game_root / "data0.bhd").is_file():
             return self.error("Set Game Root to your Nightreign 'Game' folder (the one with data0.bhd) first.")
-        includes = [
-            folder for folder, wanted in (("chr/", stan.nr_unpack_chr), ("parts/", stan.nr_unpack_parts),
-                                          ("map/", stan.nr_unpack_map))
-            if wanted
-        ]
+        includes = []
+        if stan.nr_unpack_chr:
+            includes.append("chr/")
+        if stan.nr_unpack_parts:
+            includes.append("parts/")
+        if stan.nr_unpack_map:
+            includes += ["map/mapstudio/", "map/m3", "map/m4", "map/m5", "asset/aeg/"]
+        if stan.nr_unpack_overworld:
+            includes += ["map/mapstudio/", "map/m6"]
         if not includes:
             return self.error("Tick at least one folder to unpack.")
+        # Nightreign-only characters/assets (e.g. c7720) have their MATBINs only in the game's own MATBINBNDs; the
+        # bundled Elden Ring ones lack them and those materials import untextured. 4 MB, so always included.
+        includes = list(dict.fromkeys(["material/"] + includes))
         out_dir = Path(bpy.path.abspath(stan.nr_unpack_dir)) if stan.nr_unpack_dir else default_unpack_dir()
         if out_dir.resolve() == game_root.resolve():
             return self.error("Unpack Folder must not be the game folder.")
 
         _JOB = job = _UnpackJob()
-        self._game_root, self._out_dir, self._maps = game_root, out_dir, "map/" in includes
+        self._game_root, self._out_dir, self._maps = game_root, out_dir, "map/mapstudio/" in includes
         threading.Thread(target=_run_job, args=(job, game_root, out_dir, includes), daemon=True).start()
         context.window_manager.progress_begin(0, 100)
         self._timer = context.window_manager.event_timer_add(0.25, window=context.window)
@@ -208,5 +216,6 @@ class StanUnpackNightreign(LoggingOperator):
         settings.prefer_import_from_project = True
         if self._maps:
             settings.nightreign_unpack_staging_str = str(self._out_dir)
+        clear_cached_matdefs()  # pick up the unpacked material/ MATBINBNDs instead of the bundled ER fallback
         self.info(f"{job.status}. Project Root set to it.")
         return {"FINISHED"}
