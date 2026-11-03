@@ -24,7 +24,8 @@ You do not need Git or Python: the installer installs Git if it is missing, and 
    freezes for about a minute while this happens.
 4. In the 3D Viewport press **N** and open the **Stan's Tools** tab. Set **Game** and click **Auto-Detect**.
 
-If the add-on did not switch on by itself, enable it in **Edit → Preferences → Add-ons**: search "Soulstruct".
+If the add-on did not switch on (no internet on the first launch, for example), it tries again the next time
+Blender starts. You can also enable it yourself in **Edit → Preferences → Add-ons**: search "Soulstruct".
 
 ## Updates
 
