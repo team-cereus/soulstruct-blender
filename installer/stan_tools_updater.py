@@ -86,10 +86,17 @@ def apply_pending_update(repo: Path, git: str) -> bool:
     return True
 
 
+def _vendored_wheels(repo: Path) -> list[str]:
+    """Wheels not on PyPI (e.g. `pyrelink`) that ship in the repo."""
+    return sorted(str(p) for p in (repo / "io_soulstruct_lib" / "vendor").glob("*.whl"))
+
+
 def _dependencies_hash(repo: Path) -> str:
     digest = hashlib.sha256()
     for library in LIBRARIES:
         digest.update((repo / "io_soulstruct_lib" / library / "pyproject.toml").read_bytes())
+    for wheel in _vendored_wheels(repo):
+        digest.update(Path(wheel).name.encode())
     return digest.hexdigest()
 
 
@@ -110,6 +117,7 @@ def sync_dependencies(repo: Path, state: dict):
     subprocess.run(
         [
             sys.executable, "-m", "pip", "install",
+            *_vendored_wheels(repo),
             "-e", str(lib / "soulstruct"),
             "-e", str(lib / "soulstruct-havok"),
             "--target", modules,

@@ -65,15 +65,19 @@ def _ensure_soulstruct_installed():
             print(_ex.stderr)
             raise RuntimeError(f"Failed to {purpose} in Blender Python. Error: {_ex}") from _ex
 
+    # `pyrelink` (used by the add-on itself) is not on PyPI; upstream bundles it in its Extension, we vendor it.
+    vendored_wheels = sorted(str(p) for p in (io_soulstruct_lib_path / "vendor").glob("*.whl"))
+
     _call_python_module("call `ensurepip`", "ensurepip")
     _call_python_module("upgrade `pip`", "pip", "install", "--upgrade", "pip")
     _call_python_module(
         "install `soulstruct` and its dependencies",
         "pip", "install",
-            "pyrelink==0.3.4",  # used by the add-on itself (upstream ships it as an Extension wheel)
+            *vendored_wheels,
             "-e", f"{io_soulstruct_lib_path}/soulstruct",
             "-e", f"{io_soulstruct_lib_path}/soulstruct-havok",
             "--target", user_addon_modules,
+            "--upgrade",  # replace stale packages already in `--target` (e.g. an older pinned scipy)
     )
 
     print("Installed `soulstruct` and `soulstruct-havok` modules into Blender's Python environment.")
@@ -86,9 +90,11 @@ def _ensure_soulstruct_installed():
     try:
         import soulstruct.base
         import soulstruct.havok
+        import pyrelink
     except ImportError as ex:
         raise ImportError(
-            "Required modules 'soulstruct' and 'soulstruct-havok' could not be imported, even after attempted install. "
+            "Required modules 'soulstruct', 'soulstruct-havok' and 'pyrelink' could not be imported, even after "
+            "attempted install. "
             "Please ensure they are installed in Blender's Python environment (in user's local `modules`). "
             "Restarting Blender and trying again may also fix this."
         ) from ex
