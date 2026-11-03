@@ -50,7 +50,7 @@ from .npc_param import _resolve_npc_param_xml_path
 from .regulation_bin import resolve_regulation_bin_dir
 from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
-from .nr_unpack import StanUnpackNightreign, unpack_status
+from .nr_unpack import StanUnpackNightreign, default_unpack_dir, unpack_status
 from .poi_editor import (
     POI_EDITOR_CATEGORIES,
     StanPoiEditorPick,
@@ -145,7 +145,12 @@ class StanSetupPanel(_StanToolsPanel):
             box.prop(stan, "nr_unpack_map")
             box.prop(stan, "nr_unpack_poi_textures")
             box.prop(stan, "nr_unpack_overworld")
-            box.label(text="Unpack Folder (empty = AppData\\Local\\StanTools):")
+            text_with_tooltip(
+                box,
+                "Unpack Folder (empty = default):",
+                f"Default: {default_unpack_dir()}\n"
+                "Set the STAN_TOOLS_DATA_DIR environment variable to move the default (e.g. to another drive).",
+            )
             box.prop(stan, "nr_unpack_dir", text="")
             box.operator(StanUnpackNightreign.bl_idname, icon="IMPORT")
             if status := unpack_status():
@@ -415,7 +420,11 @@ class StanMapPoiPanel(_StanToolsPanel):
         prev_op.direction = -1
         row.operator(StanPoiEditorPick.bl_idname, text=stan.poi_edit_tile or "Pick POI...", icon="VIEWZOOM")
         row.operator(StanPoiEditorStep.bl_idname, text="", icon="TRIA_RIGHT").direction = 1
-        layout.prop(stan, "poi_edit_load_models")
+        row = layout.row(align=True)
+        row.prop(stan, "poi_edit_load_models")
+        sub = row.row(align=True)
+        sub.enabled = stan.poi_edit_load_models
+        sub.prop(stan, "poi_edit_load_textures")
 
         box = layout.box()
         box.label(text="Show", icon="FILTER")

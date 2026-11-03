@@ -180,6 +180,14 @@ class StanToolsSettings(SoulstructPropertyGroup):
         description="Show map pieces and assets with their models (slower). Off: every part is an Empty",
         default=True,
     )
+    poi_edit_load_textures: bpy.props.BoolProperty(
+        name="Textures",
+        description=(
+            "Load model textures (slower). Needs POI Textures unpacked (asset/aet); skipped automatically without it. "
+            "Models are cached for the session, so this only affects models not loaded yet"
+        ),
+        default=True,
+    )
     poi_edit_show_map_pieces: bpy.props.BoolProperty(
         name="Map Pieces", default=True, update=_update_poi_filters
     )

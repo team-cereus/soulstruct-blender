@@ -41,6 +41,10 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _stan_tools_dir() -> Path:
+    """Stan's Tools data folder (unpacker download, default unpack folder). `STAN_TOOLS_DATA_DIR` moves it, e.g. off
+    a full C: drive; otherwise %LOCALAPPDATA%/StanTools."""
+    if data_dir := os.environ.get("STAN_TOOLS_DATA_DIR"):
+        return Path(data_dir)
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "StanTools"
 
 

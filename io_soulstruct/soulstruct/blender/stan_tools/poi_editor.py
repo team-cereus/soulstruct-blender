@@ -17,6 +17,7 @@ __all__ = [
     "POI_EDITOR_CATEGORIES",
 ]
 
+import logging
 import re
 import struct
 import time
@@ -79,11 +80,10 @@ def editor_tile_stem() -> str:
 
 
 def _remove_collection_tree(collection: bpy.types.Collection):
-    for child in list(collection.children):
-        _remove_collection_tree(child)
-    for obj in list(collection.objects):
-        bpy.data.objects.remove(obj, do_unlink=True)
-    bpy.data.collections.remove(collection)
+    """Delete a collection, its child collections and their objects in one batch (one-by-one removal of a few
+    thousand objects took ~10 s)."""
+    collections = [collection, *collection.children_recursive]
+    bpy.data.batch_remove([*collection.all_objects, *collections])
 
 
 def set_category_visibility(context: bpy.types.Context, category: str, visible: bool):
@@ -121,6 +121,21 @@ def _write_entry_transform(entry, obj: bpy.types.Object):
         entry.scale = transform.game_scale
 
 
+class _CollectWarnings:
+    """Operator stand-in that collects warnings instead of logging them. A POI import emits ~1,000 'texture not
+    found' warnings, and rendering them through the rich log handler cost ~15 s per load."""
+
+    def __init__(self, operator: LoggingOperator):
+        self._operator = operator
+        self.warnings: list[str] = []
+
+    def warning(self, msg: str, report: bool | None = None):
+        self.warnings.append(msg)
+
+    def __getattr__(self, name):
+        return getattr(self._operator, name)
+
+
 def _import_models(operator, context, settings, map_stem: str, model_names: set[str], collection) -> dict[str, bpy.types.Object]:
     """Import each model once (batch import) into `collection`. Returns model name -> root object."""
     path_sources, binder_sources = {}, {}
@@ -144,6 +159,55 @@ def _import_models(operator, context, settings, map_stem: str, model_names: set[
         name: (bl_flver.armature if bl_flver.armature is not None else bl_flver.mesh)
         for name, bl_flver in bl_flvers.items()
     }
+
+
+def _cached_models(context: bpy.types.Context) -> dict[str, bpy.types.Object]:
+    """Models imported by earlier POI loads this session, kept (hidden) so Reload / Prev / Next reuse them."""
+    collection = bpy.data.collections.get(_MODELS_COLLECTION)
+    if collection is None:
+        return {}
+    return {obj["poi_model"]: obj for obj in collection.objects if "poi_model" in obj and obj.parent is None}
+
+
+def _models_collection(context: bpy.types.Context, exclude: bool) -> bpy.types.Collection:
+    """The hidden model cache. FLVER import needs its objects in the view layer, so it is only excluded after."""
+    collection = bpy.data.collections.get(_MODELS_COLLECTION)
+    if collection is None:
+        collection = bpy.data.collections.new(_MODELS_COLLECTION)
+    if collection.name not in context.scene.collection.children:
+        context.scene.collection.children.link(collection)
+    context.view_layer.layer_collection.children[collection.name].exclude = exclude
+    return collection
+
+
+def _asset_textures_unpacked(settings) -> bool:
+    return any(root.get_dir_path("asset", "aet").is_dir() for root in settings.all_import_roots())
+
+
+def _import_models_quietly(operator, context, settings, stem: str, model_names: set[str], stan) -> dict:
+    """Import `model_names` into the model cache, without per-texture log spam, optionally without textures."""
+    import_settings = context.scene.flver_import_settings
+    old_textures = import_settings.import_textures
+    # Without asset/aet there is nothing to find, and every lookup would still cost time and a warning.
+    import_settings.import_textures = stan.poi_edit_load_textures and _asset_textures_unpacked(settings)
+    quiet = _CollectWarnings(operator)
+    soulstruct_logger = logging.getLogger("soulstruct")
+    old_level = soulstruct_logger.level
+    soulstruct_logger.setLevel(logging.ERROR)  # library warnings (missing TPFs, MTDs) are just as noisy
+    try:
+        models = _import_models(quiet, context, settings, stem, model_names, _models_collection(context, False))
+    finally:
+        soulstruct_logger.setLevel(old_level)
+        import_settings.import_textures = old_textures
+        _models_collection(context, True)
+    for name, obj in models.items():
+        obj["poi_model"] = name
+    if quiet.warnings:
+        print(f"[POI editor] {len(quiet.warnings)} model import warnings for {stem}, first 10:")
+        for msg in quiet.warnings[:10]:
+            print(f"    {msg}")
+        operator.warning(f"{len(quiet.warnings)} model import warnings (e.g. missing textures); see the console.")
+    return models
 
 
 def load_poi_tile(operator: LoggingOperator, context: bpy.types.Context, stem: str) -> set[str]:
@@ -176,10 +240,9 @@ def load_poi_tile(operator: LoggingOperator, context: bpy.types.Context, stem: s
             entry.model.name for list_name, entries, _ in _iter_msb_lists(msb) if list_name in _MODEL_LISTS
             for entry in entries if getattr(entry, "model", None)
         }
-        templates = bpy.data.collections.new(_MODELS_COLLECTION)
-        root.children.link(templates)
-        models = _import_models(operator, context, settings, stem, model_names, templates)
-        context.view_layer.layer_collection.children[EDITOR_ROOT].children[_MODELS_COLLECTION].exclude = True
+        models = _cached_models(context)
+        if missing := model_names - models.keys():
+            models |= _import_models_quietly(operator, context, settings, stem, missing, stan)
 
     loaded_lists, counts = [], defaultdict(int)
     for list_name, entries, is_part in _iter_msb_lists(msb):
@@ -206,7 +269,7 @@ def load_poi_tile(operator: LoggingOperator, context: bpy.types.Context, stem: s
             counts[category] += 1
     root["poi_msb_lists"] = ",".join(loaded_lists)
     summary = ", ".join(f"{n} {c.lower()}" for c, n in counts.items())
-    operator.info(f"Loaded POI {stem}: {summary} ({len(models)} models) in {time.perf_counter() - started:.1f} s.")
+    operator.info(f"Loaded POI {stem}: {summary} ({len(models)} models cached) in {time.perf_counter() - started:.1f} s.")
     return {"FINISHED"}
 
 
