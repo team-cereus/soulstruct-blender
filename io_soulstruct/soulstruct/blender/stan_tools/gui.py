@@ -32,6 +32,7 @@ from .operators import (
     StanShowAllCharacterMeshes,
     StanApplySceneLighting,
     StanRemoveSceneLighting,
+    text_with_tooltip,
 )
 from .poi_operators import (
     StanRefreshMapSeedList,
@@ -134,11 +135,12 @@ class StanSetupPanel(_StanToolsPanel):
             box.prop(stan, "nr_unpack_chr")
             box.prop(stan, "nr_unpack_parts")
             box.prop(stan, "nr_unpack_map")
+            box.prop(stan, "nr_unpack_overworld")
             box.label(text="Unpack Folder (empty = AppData\\Local\\StanTools):")
             box.prop(stan, "nr_unpack_dir", text="")
             box.operator(StanUnpackNightreign.bl_idname, icon="IMPORT")
             if status := unpack_status():
-                box.label(text=status, icon="ERROR" if status.startswith("Unpack failed") else "INFO")
+                text_with_tooltip(box, status, icon="ERROR" if status.startswith("Unpack failed") else "INFO")
 
 
 @io_soulstruct_panel
@@ -317,30 +319,35 @@ class StanMapPoiPanel(_StanToolsPanel):
         settings = context.scene.soulstruct_settings
         stan = context.scene.stan_tools_settings
 
-        layout.label(
-            text="Seed Layout = procedural POI placement on overworld; "
-            "POI Tile Catalog = browse slot map meshes (m30_30, m46_51, …)",
+        text_with_tooltip(
+            layout,
+            "Seed Layout or POI Tile Catalog",
+            "Seed Layout: the procedural POI placement of one map seed on the overworld.\n"
+            "POI Tile Catalog: browse the POI slot maps (m30_30, m46_51, ...) one at a time at the origin.",
             icon="EMPTY_AXIS",
         )
 
         reg_dir = resolve_regulation_bin_dir(settings, stan)
         if reg_dir:
-            layout.label(text=f"regulation-bin: {reg_dir}", icon="CHECKMARK")
+            text_with_tooltip(layout, f"regulation-bin: {reg_dir.name}", str(reg_dir), icon="CHECKMARK")
         else:
-            layout.label(text="regulation-bin not found", icon="ERROR")
-            layout.label(
-                text="Set Game Root to unpacked .../Game (contains regulation-bin/)",
-                icon="INFO",
+            text_with_tooltip(
+                layout,
+                "regulation-bin not found",
+                "Set Game Root to the Nightreign Game folder that contains regulation-bin (param XML dumps).",
+                icon="ERROR",
             )
 
         staging = settings.nightreign_unpack_staging_path
         if staging and staging.is_dir():
-            layout.label(text=f"Unpack staging: {staging}", icon="CHECKMARK")
+            text_with_tooltip(layout, f"Map files: {staging.name}", str(staging), icon="CHECKMARK")
         else:
-            layout.label(text="Unpack staging not set or missing", icon="INFO")
-            layout.label(
-                text="Soulstruct Settings → Unpack Staging (mapstudio MSB fallback)",
-                icon="BLANK1",
+            text_with_tooltip(
+                layout,
+                "Map files not unpacked",
+                "Setup > Unpacked Game Files: tick POI Maps and click Unpack Nightreign Files.\n"
+                "(Or set Soulstruct Settings > Unpack Staging to a folder with map/mapstudio MSBs.)",
+                icon="INFO",
             )
 
         layout.prop(stan, "poi_display_mode", text="")
@@ -351,8 +358,10 @@ class StanMapPoiPanel(_StanToolsPanel):
             row.prop(stan, "map_seed_id", text="Seed")
             row.operator(StanRefreshMapSeedList.bl_idname, text="", icon="FILE_REFRESH")
         elif stan.poi_display_mode == "POI_TILE_CATALOG":
-            layout.label(
-                text="One tile at a time at origin; use Prev/Next or Browse mode",
+            text_with_tooltip(
+                layout,
+                "One tile at a time at the origin",
+                "Loads one POI tile at the world origin. Use Prev/Next, or Browse to step with the arrow keys.",
                 icon="INFO",
             )
             total = catalog_tile_count(stan)
@@ -391,5 +400,10 @@ class StanMapPoiPanel(_StanToolsPanel):
             row.operator(StanImportSelectedPoiMapTile.bl_idname, icon="MESH_CUBE")
 
         if stan.poi_display_mode != "POI_TILE_CATALOG":
-            layout.label(text="POIs use overworld coords — use Frame POI View if empty viewport", icon="INFO")
-            layout.label(text="Markers use game→Blender coords (m60 grid origin 46, 49)")
+            text_with_tooltip(
+                layout,
+                "Viewport empty? Use Frame POI View",
+                "POIs use overworld coordinates, far from the origin. Frame POI View moves the view to them.\n"
+                "Markers use game-to-Blender coordinates relative to the m60 grid origin (46, 49).",
+                icon="INFO",
+            )

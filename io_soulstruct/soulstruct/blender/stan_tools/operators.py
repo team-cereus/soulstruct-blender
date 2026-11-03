@@ -8,6 +8,8 @@ __all__ = [
     "StanShowAllCharacterMeshes",
     "StanApplySceneLighting",
     "StanRemoveSceneLighting",
+    "StanTextTooltip",
+    "text_with_tooltip",
 ]
 
 from pathlib import Path
@@ -186,3 +188,27 @@ class StanRemoveSceneLighting(LoggingOperator):
         remove_scene_lighting(context)
         self.info("Scene lighting removed.")
         return {"FINISHED"}
+
+@io_soulstruct_operator
+class StanTextTooltip(bpy.types.Operator):
+    """Flat 'label' whose tooltip shows the full text (Blender labels have no tooltips). Click copies it."""
+
+    bl_idname = "stan_tools.text_tooltip"
+    bl_label = ""
+    bl_options = {"INTERNAL"}
+
+    text: bpy.props.StringProperty(options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        return f"{properties.text}\n\nClick to copy"
+
+    def execute(self, context):
+        context.window_manager.clipboard = self.text
+        return {"FINISHED"}
+
+
+def text_with_tooltip(layout: bpy.types.UILayout, text: str, full_text: str = "", icon: str = "NONE"):
+    """Draw `text` like a label, with `full_text` (default: `text`) on hover for when the panel truncates it."""
+    op = layout.operator(StanTextTooltip.bl_idname, text=text, icon=icon, emboss=False)
+    op.text = full_text or text

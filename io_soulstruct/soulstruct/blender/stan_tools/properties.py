@@ -82,7 +82,12 @@ class StanToolsSettings(SoulstructPropertyGroup):
         name="Weapons and Armor (3.0 GB)", description="Unpack parts/ (weapons and equipment)", default=True
     )
     nr_unpack_map: bpy.props.BoolProperty(
-        name="Maps (6.2 GB)", description="Unpack map/ (needed for the Map POIs panel)", default=False
+        name="POI Maps (2.6 GB)",
+        description="Unpack the map MSBs, POI map areas m3x-m5x and asset/aeg (for the Map POIs panel)",
+        default=False,
+    )
+    nr_unpack_overworld: bpy.props.BoolProperty(
+        name="Overworld Maps (4.2 GB)", description="Unpack map/m6x (the overworld terrain)", default=False
     )
 
     poi_display_mode: bpy.props.EnumProperty(

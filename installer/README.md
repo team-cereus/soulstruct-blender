@@ -7,7 +7,7 @@ Windows only. Takes about five minutes, and updates install themselves after tha
 - **Blender 5.1 or newer**, from <https://www.blender.org/download/>. Start it once, then close it.
 - **Nightreign or Elden Ring** installed through Steam. Nightreign does not need to be unpacked: Stan's Tools
   does that for you (step 5 below). Elden Ring still needs UXM, so `Game\chr\` holds `.chrbnd.dcx` files.
-- Free disk space for Nightreign's unpacked files: about 6 GB for characters and weapons, 6 GB more for maps.
+- Free disk space for Nightreign's unpacked files: about 6 GB for characters and weapons, 2.6 GB more for POI maps (4.2 GB for the overworld).
 - Internet access for the install and for Blender's first launch afterwards.
 
 You do not need Git or Python: the installer installs Git if it is missing, and Blender brings its own Python.
