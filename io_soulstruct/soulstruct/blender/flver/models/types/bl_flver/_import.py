@@ -491,7 +491,9 @@ def _create_bl_mesh_from_merged_mesh(
         return
 
     # Drop faces that don't use three unique vertex indices (topologically degenerate: repeated index).
-    unique_mask = np.apply_along_axis(lambda row: len(np.unique(row)) == 3, 1, face_vertex_indices)  # 1D array (N)
+    # Vectorized pairwise comparison (a per-row `np.unique` took seconds on large meshes).
+    v0, v1, v2 = face_vertex_indices[:, 0], face_vertex_indices[:, 1], face_vertex_indices[:, 2]
+    unique_mask = (v0 != v1) & (v1 != v2) & (v0 != v2)  # 1D array (N)
 
     # Drop faces with (near-)zero area: distinct vertex indices that are positionally coincident or
     # collinear. FLVER data frequently has separate vertex indices (different UVs/normals/seams) that sit
