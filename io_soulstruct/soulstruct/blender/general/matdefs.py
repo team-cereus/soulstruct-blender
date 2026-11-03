@@ -89,6 +89,9 @@ def get_matbinbnd(operator: LoggingOperator, context: bpy.types.Context) -> MATB
         for resource_key, resource_path in game.bundled_resource_paths.items()
         if resource_key.endswith("MATBINBND")
     ]
+    if settings.is_er_family():
+        # Tree/foliage MATBINs (SpeedTree_*) live in their own binder next to `allmaterial`; not bundled.
+        matbinbnd_names.append("speedtree.matbinbnd.dcx")
 
     if settings.prefer_import_from_project:
         labelled_roots = (("project", settings.project_root), ("game", settings.game_root))

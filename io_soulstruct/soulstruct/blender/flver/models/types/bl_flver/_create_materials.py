@@ -120,8 +120,13 @@ def create_materials(
             try:
                 if BLENDER_GAME_CONFIG[settings.game_type].uses_matbin:
                     if mat_def_name.endswith(".mtd"):
-                        operator.warning(f"Elden Ring MTDs are not yet supported: {mat_def_name}")
-                        matdef = None
+                        # Many ER/NR assets still name '.mtd' materials (e.g. M[AMSN_V].mtd, SpeedTree_*.mtd) that
+                        # exist as MATBINs of the same stem, so look them up rather than leaving them untextured.
+                        try:
+                            matdef = matdef_class.from_matbinbnd_or_name(mat_def_name, matbinbnd)
+                        except Exception:
+                            operator.warning(f"No MATBIN for Elden Ring MTD material: {mat_def_name}")
+                            matdef = None
                     else:
                         matdef = matdef_class.from_matbinbnd_or_name(mat_def_name, matbinbnd)
                 else:
