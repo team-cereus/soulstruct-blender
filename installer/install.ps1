@@ -140,6 +140,16 @@ function Copy-OodleDll {
     Write-Note "  $target"
 }
 
+# blender.exe is not long-path aware, so its Python cannot open a file whose full path is 260+ characters, even with
+# Windows long paths enabled. Fail here with a clear fix instead of an ImportError on the add-on's first enable.
+function Assert-PathsFitBlender {
+    $longest = (& $script:Git -C $InstallDir ls-files --recurse-submodules | Measure-Object -Property Length -Maximum).Maximum
+    if ($InstallDir.Length + 1 + $longest -ge 260) {
+        throw ("The install folder path is too long for Blender ($InstallDir). Run this again with a shorter one, " +
+            "for example: `$env:STAN_TOOLS_DIR = `"C:\StanTools`"")
+    }
+}
+
 function Get-AddonsDir([string]$Version) {
     return Join-Path $env:APPDATA "Blender Foundation\Blender\$Version\scripts\addons"
 }
@@ -233,6 +243,7 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
 Write-Step "Downloading the soulstruct libraries"
 Invoke-Git @("-C", $InstallDir, "submodule", "sync", "--quiet", "--recursive")
 Invoke-Git @("-C", $InstallDir, "submodule", "update", "--init", "--recursive", "--quiet")
+Assert-PathsFitBlender
 
 Copy-OodleDll
 
