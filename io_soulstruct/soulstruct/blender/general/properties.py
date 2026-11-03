@@ -303,7 +303,7 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
 
     use_pyrelink_flver: bpy.props.BoolProperty(
         name="Use C++ FLVER",
-        description="Use accelerated FLVER from Firelink C++ library",
+        description="Use accelerated FLVER from Firelink C++ library (Nightreign FLVERs are always read in Python)",
         default=True,
     )
 
@@ -360,6 +360,12 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
             return self.game.import_game_submodule("constants")
         except ImportError:
             return None
+
+    @property
+    def read_flvers_with_pyrelink(self) -> bool:
+        """pyrelink 0.3.4 cannot read Nightreign FLVERs (version 0x20021: non-zero header padding at offset 116), so
+        those are always read with soulstruct. Writing still follows `use_pyrelink_flver`."""
+        return self.use_pyrelink_flver and not self.is_game(NIGHTREIGN)
 
     @property
     def pyrelink_game_type(self) -> pyre_core.GameType:

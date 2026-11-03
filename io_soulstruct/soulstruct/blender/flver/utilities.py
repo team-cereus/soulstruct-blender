@@ -57,9 +57,17 @@ def get_flvers_from_binder(
         raise FLVERImportError(f"Cannot find a FLVER file in binder {file_path}.")
     elif not allow_multiple and len(flver_entries) > 1:
         raise FLVERImportError(f"Found multiple FLVER files in binder {file_path}. Only one is expected.")
-    if use_pyrelink_flver:
-        return [pyre_flver.FLVER.from_bytes(entry.get_uncompressed_data()) for entry in flver_entries]
-    return [FLVER.from_binder_entry(entry) for entry in flver_entries]
+    if not use_pyrelink_flver:
+        return [FLVER.from_binder_entry(entry) for entry in flver_entries]
+    flvers = []
+    for entry in flver_entries:
+        data = entry.get_uncompressed_data()
+        try:
+            flvers.append(pyre_flver.FLVER.from_bytes(data))
+        except RuntimeError:
+            # pyrelink 0.3.4 cannot read Nightreign FLVERs (version 0x20021: non-zero header padding at offset 116).
+            flvers.append(FLVER.from_bytes(data))
+    return flvers
 
 
 # Swap X and Y, negate Z (to preserve handedness). Makes bones point nicely X-forward in Blender.

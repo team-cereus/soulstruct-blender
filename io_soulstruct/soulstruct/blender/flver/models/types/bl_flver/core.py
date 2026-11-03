@@ -16,6 +16,7 @@ from pathlib import Path
 
 import bpy
 
+from soulstruct.containers import Binder
 from soulstruct.flver import FLVER
 from soulstruct.utilities.text import natural_keys
 
@@ -430,7 +431,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
             if context.window_manager:
                 context.window_manager.progress_update(s)
 
-        if settings.use_pyrelink_flver:
+        if settings.read_flvers_with_pyrelink:
             # Use C++ acceleration.
             flvers_from_paths = pyre_flver.FLVER.from_paths_parallel(list(flver_path_sources.values()))
             flvers_from_binders = pyre_flver.FLVER.from_bytes_parallel(
@@ -442,9 +443,17 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         else:
             # Use pure Python FLVER.
             flvers_from_paths = FLVER.from_paths_parallel(list(flver_path_sources.values()))
-            flvers_from_binders = FLVER.from_binder_entries_parallel(
-                [entry for entry, _ in flver_binder_sources.values()]
-            )
+            # Sources are `pyrelink` binder entries, which soulstruct's (multiprocessing) entry readers cannot take.
+            flvers_from_binders = []
+            for name, (entry, _) in flver_binder_sources.items():
+                try:
+                    flver = FLVER.from_bytes(entry.get_uncompressed_data())
+                except Exception as ex:
+                    operator.warning(f"Could not read FLVER '{name}' from binder entry '{entry.name}': {ex}")
+                    flver = None
+                else:
+                    flver.path = Path(entry.name)
+                flvers_from_binders.append(flver)
 
         progress(steps // 5)
 
@@ -469,7 +478,9 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         if flver_import_settings.import_textures:
 
             step = steps // 5
-            if settings.pyrelink_game_type == pyre.GameType.Bloodborne:
+            # Nightreign: pyrelink 0.3.4's TextureFinder cannot find the Oodle DLL to read DCX_KRAK TEXBNDs (even after
+            # `pyrelink.core.load_oodle_dll()`), so it uses soulstruct's `ImageImportManager` like Bloodborne does.
+            if settings.pyrelink_game_type == pyre.GameType.Bloodborne or settings.is_game("NIGHTREIGN"):
                 # TODO: pyrelink TextureFinder can deswizzle PS4 textures now - upgrade.
                 image_import_manager = ImageImportManager(operator, context)
                 texture_finders = []
@@ -477,9 +488,12 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
                 # Find textures for all loaded FLVERs.
                 for model_name, flver in flvers.items():
                     _, source_binder = flver_binder_sources.get(model_name, (None, None))
+                    source_path = Path(source_binder.path if source_binder else flver.path)
+                    # `ImageImportManager` reads TPF entries with soulstruct (and Python regexes), so it needs a
+                    # soulstruct `Binder`, not the `pyrelink` one the FLVER came from.
                     image_import_manager.find_flver_textures(
-                        source_binder.path if source_binder else flver.path,
-                        source_binder,
+                        source_path,
+                        Binder.from_path(source_path) if source_binder else None,
                     )
                     progress(step)
                     step += 1
@@ -568,8 +582,8 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         p = time.perf_counter()
 
         # Merge meshes in parallel. Empty meshes will be `None`.
-        # API is the same for Python and C++ FLVER.
-        if settings.use_pyrelink_flver:
+        # API is the same for Python and C++ FLVER, but must match the reader the FLVERs came from.
+        if settings.read_flvers_with_pyrelink:
             merge_successes = pyre_flver.FLVER.update_cached_merged_meshes_parallel(
                 flvers_to_merge,
                 flvers_mesh_material_indices,

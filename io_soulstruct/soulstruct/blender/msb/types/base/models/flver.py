@@ -159,7 +159,7 @@ class BlenderMSBMapPieceModelImporter(BaseBlenderMSBFLVERModelImporter):
                 raise FLVERImportError(f"Cannot find a FLVER file in MAPBND {flver_source_path}.")
             flver_entry = flver_entries[0]
 
-            if settings.use_pyrelink_flver:
+            if settings.read_flvers_with_pyrelink:
                 flver = pyre_flver.FLVER.from_bytes(flver_entry.get_uncompressed_data())
             else:
                 flver = FLVER.from_bytes(flver_entry.get_uncompressed_data())
@@ -171,7 +171,7 @@ class BlenderMSBMapPieceModelImporter(BaseBlenderMSBFLVERModelImporter):
             except FileNotFoundError:
                 raise FLVERImportError(f"Cannot find FLVER model file for Map Piece: {model_name}.")
             operator.info(f"Importing map piece FLVER: {flver_source_path}")
-            if settings.use_pyrelink_flver:
+            if settings.read_flvers_with_pyrelink:
                 flver = pyre_flver.FLVER.from_path(flver_source_path)
             else:
                 flver = FLVER.from_path(flver_source_path)
@@ -297,7 +297,7 @@ class BlenderMSBObjectModelImporter(BaseBlenderMSBFLVERModelImporter):
 
         objbnd = pyre.Binder.from_path(objbnd_path)
         binder_flvers = get_flvers_from_binder(
-            objbnd, objbnd_path, allow_multiple=True, use_pyrelink_flver=settings.use_pyrelink_flver
+            objbnd, objbnd_path, allow_multiple=True, use_pyrelink_flver=settings.read_flvers_with_pyrelink
         )
 
         if flver_import_settings.import_textures:
