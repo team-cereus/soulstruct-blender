@@ -15,6 +15,7 @@ import typing as tp
 from pathlib import Path
 
 import bpy
+from rich.markup import escape
 
 from soulstruct.containers import Binder
 from soulstruct.flver import FLVER
@@ -449,7 +450,9 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
                 try:
                     flver = FLVER.from_bytes(entry.get_uncompressed_data())
                 except Exception as ex:
-                    operator.warning(f"Could not read FLVER '{name}' from binder entry '{entry.name}': {ex}")
+                    # Reader errors can quote raw file bytes, which break the (rich markup) log handler.
+                    reason = escape(str(ex).splitlines()[0][:200]) if str(ex) else type(ex).__name__
+                    operator.warning(f"Could not read FLVER '{name}' from binder entry '{entry.name}': {reason}")
                     flver = None
                 else:
                     flver.path = Path(entry.name)

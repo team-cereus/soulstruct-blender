@@ -232,6 +232,9 @@ class ImageImportManager:
             if not self.aet_root_directory:
                 raise KeyError("ImageImportManager has not set the 'aet' root directory for asset textures.")
             aet_tpf_path = self.aet_root_directory / texture_stem[:6] / f"{texture_stem[:10]}.tpf.dcx"
+            if not aet_tpf_path.is_file():
+                # KeyError = 'texture not found' (placeholder image) instead of failing the whole FLVER import.
+                raise KeyError(f"Asset texture TPF not found (is asset/aet unpacked?): {aet_tpf_path}")
             self._pending_tpf_sources.setdefault(texture_stem, aet_tpf_path)
             # Can now be found below.
 
