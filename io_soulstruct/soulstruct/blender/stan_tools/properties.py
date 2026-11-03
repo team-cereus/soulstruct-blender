@@ -49,6 +49,14 @@ def _on_npc_param_row_changed(self, context: bpy.types.Context) -> None:
     self.apply_active_npc_param(context)
 
 
+def _update_poi_filters(self, context: bpy.types.Context) -> None:
+    """Show/hide the POI editor's part-type collections to match the filter toggles."""
+    from .poi_editor import POI_EDITOR_CATEGORIES, set_category_visibility
+
+    for category in POI_EDITOR_CATEGORIES:
+        set_category_visibility(context, category, getattr(self, f"poi_edit_show_{category.lower().replace(' ', '_')}"))
+
+
 @io_soulstruct_properties
 @io_soulstruct_pointer_property(bpy.types.Scene, "stan_tools_settings")
 class StanToolsSettings(SoulstructPropertyGroup):
@@ -86,6 +94,11 @@ class StanToolsSettings(SoulstructPropertyGroup):
         description="Unpack the map MSBs, POI map areas m3x-m5x and asset/aeg (for the Map POIs panel)",
         default=False,
     )
+    nr_unpack_poi_textures: bpy.props.BoolProperty(
+        name="POI Textures (3.7 GB)",
+        description="Unpack asset/aet (asset textures), so POI maps in the Map POIs editor are textured",
+        default=False,
+    )
     nr_unpack_overworld: bpy.props.BoolProperty(
         name="Overworld Maps (4.2 GB)", description="Unpack map/m6x (the overworld terrain)", default=False
     )
@@ -96,7 +109,7 @@ class StanToolsSettings(SoulstructPropertyGroup):
         items=[
             ("ATTACH_POINTS", "Attach Points", "All world attach slots from SmallBaseAndSpotAttachPoint"),
             ("SEED_LAYOUT", "Seed Layout", "Procedural POI placements for the selected map seed"),
-            ("POI_TILE_CATALOG", "POI Tile Catalog", "Browse POI slot map tiles (m30_30, m46_51, …) one at a time at origin"),
+            ("POI_TILE_CATALOG", "POI Tile Catalog", "Pick a POI map (m30_30, m46_05, …), edit its parts and save it"),
             ("DEFINES_ONLY", "Defines Only", "POI type definitions as markers at origin (reference)"),
         ],
         default="ATTACH_POINTS",
@@ -159,6 +172,31 @@ class StanToolsSettings(SoulstructPropertyGroup):
         name="Isolate Catalog View",
         description="Hide other scene collections while browsing the POI tile catalog",
         default=True,
+    )
+
+    poi_edit_tile: bpy.props.StringProperty(name="POI", description="POI map loaded in the POI editor", default="")
+    poi_edit_load_models: bpy.props.BoolProperty(
+        name="Load Models",
+        description="Show map pieces and assets with their models (slower). Off: every part is an Empty",
+        default=True,
+    )
+    poi_edit_show_map_pieces: bpy.props.BoolProperty(
+        name="Map Pieces", default=True, update=_update_poi_filters
+    )
+    poi_edit_show_assets: bpy.props.BoolProperty(
+        name="Assets", default=True, update=_update_poi_filters
+    )
+    poi_edit_show_enemies: bpy.props.BoolProperty(
+        name="Enemies", default=True, update=_update_poi_filters
+    )
+    poi_edit_show_collision: bpy.props.BoolProperty(
+        name="Collision", default=False, update=_update_poi_filters
+    )
+    poi_edit_show_regions: bpy.props.BoolProperty(
+        name="Regions", default=False, update=_update_poi_filters
+    )
+    poi_edit_show_other: bpy.props.BoolProperty(
+        name="Other", default=True, update=_update_poi_filters
     )
 
     poi_catalog_skip_empty: bpy.props.BoolProperty(

@@ -51,6 +51,14 @@ from .regulation_bin import resolve_regulation_bin_dir
 from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
 from .nr_unpack import StanUnpackNightreign, unpack_status
+from .poi_editor import (
+    POI_EDITOR_CATEGORIES,
+    StanPoiEditorPick,
+    StanPoiEditorReload,
+    StanPoiEditorSave,
+    StanPoiEditorStep,
+    editor_tile_stem,
+)
 from ..base.register import io_soulstruct_panel
 
 STAN_TOOLS_CATEGORY = "Stan's Tools"
@@ -135,6 +143,7 @@ class StanSetupPanel(_StanToolsPanel):
             box.prop(stan, "nr_unpack_chr")
             box.prop(stan, "nr_unpack_parts")
             box.prop(stan, "nr_unpack_map")
+            box.prop(stan, "nr_unpack_poi_textures")
             box.prop(stan, "nr_unpack_overworld")
             box.label(text="Unpack Folder (empty = AppData\\Local\\StanTools):")
             box.prop(stan, "nr_unpack_dir", text="")
@@ -358,24 +367,8 @@ class StanMapPoiPanel(_StanToolsPanel):
             row.prop(stan, "map_seed_id", text="Seed")
             row.operator(StanRefreshMapSeedList.bl_idname, text="", icon="FILE_REFRESH")
         elif stan.poi_display_mode == "POI_TILE_CATALOG":
-            text_with_tooltip(
-                layout,
-                "One tile at a time at the origin",
-                "Loads one POI tile at the world origin. Use Prev/Next, or Browse to step with the arrow keys.",
-                icon="INFO",
-            )
-            total = catalog_tile_count(stan)
-            if total:
-                tile = current_catalog_tile(stan)
-                tile_str = tile[1] if tile else "-"
-                layout.label(text=f"Tile {stan.poi_catalog_index + 1}/{total}: {tile_str}")
-                row = layout.row(align=True)
-                row.operator(StanPoiCatalogPrev.bl_idname, text="Prev", icon="TRIA_LEFT")
-                row.operator(StanPoiCatalogNext.bl_idname, text="Next", icon="TRIA_RIGHT")
-                row.operator(StanPoiCatalogFrame.bl_idname, text="Frame", icon="ZOOM_SELECTED")
-                row.operator(StanPoiCatalogBrowseModal.bl_idname, text="Browse", icon="HAND")
-            layout.prop(stan, "poi_catalog_isolate_view")
-            layout.prop(stan, "poi_catalog_skip_empty")
+            self._draw_poi_editor(layout, stan)
+            return
         else:
             layout.prop(stan, "poi_apply_grid_offset")
 
@@ -407,3 +400,31 @@ class StanMapPoiPanel(_StanToolsPanel):
                 "Markers use game-to-Blender coordinates relative to the m60 grid origin (46, 49).",
                 icon="INFO",
             )
+
+    def _draw_poi_editor(self, layout, stan):
+        text_with_tooltip(
+            layout,
+            "Pick a POI, edit it, Save POI",
+            "Loads one POI map (MSB) at the origin: every part and region becomes an object named after it.\n"
+            "Move, rotate, scale, delete or duplicate (Shift+D) them, then Save POI to write the MSB into the "
+            "Project Root (and the Mod Folder when Auto-Repack is on).",
+            icon="INFO",
+        )
+        row = layout.row(align=True)
+        prev_op = row.operator(StanPoiEditorStep.bl_idname, text="", icon="TRIA_LEFT")
+        prev_op.direction = -1
+        row.operator(StanPoiEditorPick.bl_idname, text=stan.poi_edit_tile or "Pick POI...", icon="VIEWZOOM")
+        row.operator(StanPoiEditorStep.bl_idname, text="", icon="TRIA_RIGHT").direction = 1
+        layout.prop(stan, "poi_edit_load_models")
+
+        box = layout.box()
+        box.label(text="Show", icon="FILTER")
+        grid = box.grid_flow(columns=2, even_columns=True, align=True)
+        for category in POI_EDITOR_CATEGORIES:
+            grid.prop(stan, f"poi_edit_show_{category.lower().replace(' ', '_')}", toggle=True)
+
+        row = layout.row(align=True)
+        row.operator(StanPoiEditorReload.bl_idname, icon="FILE_REFRESH")
+        row.operator(StanPoiEditorSave.bl_idname, icon="FILE_TICK")
+        if stem := editor_tile_stem():
+            text_with_tooltip(layout, f"Editing {stem}", f"Unsaved edits are lost when you load another POI.")

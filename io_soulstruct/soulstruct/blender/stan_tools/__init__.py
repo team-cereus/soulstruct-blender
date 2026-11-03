@@ -42,3 +42,4 @@ from .weapon_search import StanSearchWeaponToImport
 from .weapon_anim import StanLoadWeaponAttackAnimation
 from .player_character import StanLoadPlayerCharacter
 from .nr_unpack import StanUnpackNightreign
+from .poi_editor import StanPoiEditorPick, StanPoiEditorReload, StanPoiEditorSave, StanPoiEditorStep

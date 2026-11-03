@@ -169,6 +169,8 @@ class StanUnpackNightreign(LoggingOperator):
             includes.append("parts/")
         if stan.nr_unpack_map:
             includes += ["map/mapstudio/", "map/m3", "map/m4", "map/m5", "asset/aeg/"]
+        if stan.nr_unpack_poi_textures:
+            includes.append("asset/aet/")
         if stan.nr_unpack_overworld:
             includes += ["map/mapstudio/", "map/m6"]
         if not includes:
