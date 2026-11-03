@@ -1,214 +1,159 @@
-r"""Headless Blender smoke test: Nightreign c7720 FLVER import via Soulstruct (no UI).
+r"""Headless Blender test: Nightreign character FLVER import (and draw-mask export round trip) via the Soulstruct add-on.
 
-Run from repo root (PowerShell):
+Needs the add-on installed in Blender's user add-ons (installer or dev junctions), with its packages pip-installed by a
+first enable. Run (PowerShell):
 
-    & 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe' `
-        --background --factory-startup `
+    & 'C:\Program Files\Blender Foundation\Blender 5.1\blender.exe' --background `
         --python 'S:\_modding\tools\soulstruct-blender\scripts\blender_test_nr_c7720.py'
 
-Use --factory-startup so Blender does not auto-enable the installed io_soulstruct add-on
-(which hits GPU draw code and fails in --background).
+Environment variables:
 
-Set env vars to override paths:
+    NR_GAME_ROOT     Nightreign 'Game' folder; only needs oo2core_6_win64.dll (default: Steam install on S:).
+    NR_PROJECT_ROOT  Unpacked folder containing chr\ (default: NR_GAME_ROOT).
+    NR_CHR           Character model (default c7720).
+    NR_EXPORT        "1" (default) to also apply the first NpcParam draw mask, export the FLVER and re-import it. The
+                     character's files are copied to a temp project folder first, so nothing real is written.
+    NR_DRAW_MASK     "0" to export without applying the draw mask.
 
-    SOULSTRUCT_BLENDER_REPO  — path to soulstruct-blender clone
-    NR_GAME_ROOT              — folder containing chr\\ (e.g. ...\\NIGHTREIGN\\Game)
-    NR_CHRBND                 — optional full path to c7720.chrbnd.dcx
-
-Exits 0 on success, 1 on failure. Does not enable the full io_soulstruct add-on (avoids MSB GPU
-draw handlers that break in --background).
+Exits 0 on success, 1 on failure.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
-
-def _repo_root() -> Path:
-    env = os.environ.get("SOULSTRUCT_BLENDER_REPO")
-    if env:
-        return Path(env).resolve()
-    return Path(__file__).resolve().parents[1]
+DEFAULT_GAME_ROOT = r"S:\SteamLibrary\steamapps\common\ELDEN RING NIGHTREIGN\Game"
 
 
-def _setup_python_path(repo: Path) -> None:
-    lib = repo / "io_soulstruct_lib"
-    paths = [
-        repo / "io_soulstruct",
-        lib / "soulstruct" / "src",
-        lib / "soulstruct-havok" / "src",
-    ]
-    for p in paths:
-        s = str(p.resolve())
-        if s not in sys.path:
-            sys.path.insert(0, s)
+def _setup_addon():
+    import addon_utils
+
+    addon_utils.enable("io_soulstruct", default_set=False)
+    if not addon_utils.check("io_soulstruct")[1]:
+        raise RuntimeError("Could not enable the io_soulstruct add-on (is it installed?).")
 
 
-def _register_minimal_scene_props() -> None:
+def _configure(game_root: Path, project_root: Path, mod_root: Path | None = None):
     import bpy
-    from soulstruct.blender.flver.material.properties import (
-        FLVERGXItemProps,
-        FLVERMaterialProps,
-        FLVERMaterialSettings,
+
+    settings = bpy.context.scene.soulstruct_settings
+    settings.game_enum = os.environ.get("NR_GAME", "NIGHTREIGN")  # ELDEN_RING to compare against upstream
+    settings.game_settings.game_root_str = str(game_root)
+    settings.game_settings.project_root_str = str(project_root)
+    settings.game_settings.mod_root_str = str(mod_root or "")
+    settings.prefer_import_from_project = True
+    settings.also_export_to_game = False  # exports must only ever land in the (temp) project folder
+    bpy.context.scene.flver_import_settings.import_textures = True
+    return settings
+
+
+def _clear_scene():
+    import bpy
+
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj)
+
+
+def _import_character(chr_id: str, project_root: Path):
+    import bpy
+
+    result = bpy.ops.import_scene.character_flver(
+        directory=str(project_root / "chr"), files=[{"name": f"{chr_id}.chrbnd.dcx"}]
     )
-    from soulstruct.blender.flver.models.properties import (
-        FLVERBoneProps,
-        FLVERDummyProps,
-        FLVERImportSettings,
-        FLVERProps,
-        FLVERSubmeshProps,
-    )
-    from soulstruct.blender.general.properties import SoulstructSettings
-    from soulstruct.blender.types import SoulstructType
-
-    for cls in (
-        FLVERGXItemProps,
-        FLVERSubmeshProps,
-        FLVERBoneProps,
-        FLVERProps,
-        FLVERDummyProps,
-        FLVERImportSettings,
-        FLVERMaterialProps,
-        FLVERMaterialSettings,
-        SoulstructSettings,
-    ):
-        try:
-            bpy.utils.register_class(cls)
-        except ValueError:
-            pass  # already registered (re-run in same session)
-
-    if not hasattr(bpy.types.Scene, "flver_import_settings"):
-        bpy.types.Scene.flver_import_settings = bpy.props.PointerProperty(type=FLVERImportSettings)
-    if not hasattr(bpy.types.Scene, "flver_material_settings"):
-        bpy.types.Scene.flver_material_settings = bpy.props.PointerProperty(type=FLVERMaterialSettings)
-    if not hasattr(bpy.types.Scene, "soulstruct_settings"):
-        bpy.types.Scene.soulstruct_settings = bpy.props.PointerProperty(type=SoulstructSettings)
-
-    if not hasattr(bpy.types.Bone, "FLVER_BONE"):
-        bpy.types.Bone.FLVER_BONE = bpy.props.PointerProperty(type=FLVERBoneProps)
-
-    if not hasattr(bpy.types.Material, "FLVER_MATERIAL"):
-        bpy.types.Material.FLVER_MATERIAL = bpy.props.PointerProperty(type=FLVERMaterialProps)
-
-    if not hasattr(bpy.types.Object, "FLVER"):
-        bpy.types.Object.FLVER = bpy.props.PointerProperty(type=FLVERProps)
-    if not hasattr(bpy.types.Object, "FLVER_DUMMY"):
-        bpy.types.Object.FLVER_DUMMY = bpy.props.PointerProperty(type=FLVERDummyProps)
-
-    if not hasattr(bpy.types.Object, "soulstruct_type"):
-        bpy.types.Object.soulstruct_type = bpy.props.EnumProperty(
-            name="Soulstruct Object Type",
-            items=[
-                (SoulstructType.NONE, "None", ""),
-                (SoulstructType.FLVER, "FLVER", "FLVER mesh model"),
-                (SoulstructType.FLVER_DUMMY, "FLVER Dummy", "FLVER dummy object"),
-            ],
-            default=SoulstructType.NONE,
-        )
+    if result != {"FINISHED"}:
+        raise RuntimeError(f"import_scene.character_flver returned {result}")
+    meshes = [o for o in bpy.data.objects if o.type == "MESH" and o.name.startswith(chr_id)]
+    armatures = [o for o in bpy.data.objects if o.type == "ARMATURE" and o.name.startswith(chr_id)]
+    if len(meshes) != 1 or len(armatures) != 1:
+        raise RuntimeError(f"Expected one mesh and one armature, got {meshes} / {armatures}")
+    return meshes[0], armatures[0]
 
 
-def _make_log_op():
-    from soulstruct.blender.utilities.operators import LoggingOperator
+def _copy_character_files(source_root: Path, chr_id: str, dest_root: Path):
+    (dest_root / "chr").mkdir(parents=True)
+    for path in (source_root / "chr").glob(f"{chr_id}*"):
+        shutil.copy2(path, dest_root / "chr" / path.name)
 
-    class _LogOp:
-        settings = staticmethod(LoggingOperator.settings)
-        to_object_mode = staticmethod(LoggingOperator.to_object_mode)
-        to_edit_mode = staticmethod(LoggingOperator.to_edit_mode)
-        deselect_all = staticmethod(LoggingOperator.deselect_all)
 
-        def debug(self, msg: str) -> None:
-            print(f"DEBUG: {msg}")
-
-        def warning(self, msg: str) -> None:
-            print(f"WARNING: {msg}")
-
-        def info(self, msg: str) -> None:
-            print(f"INFO: {msg}")
-
-        def error(self, msg: str) -> None:
-            raise RuntimeError(msg)
-
-    return _LogOp()
+def _mesh_stats(mesh) -> tuple[int, int, int]:
+    return len(mesh.data.vertices), len(mesh.data.polygons), len(mesh.data.materials)
 
 
 def main() -> int:
-    repo = _repo_root()
-    _setup_python_path(repo)
-
     import bpy
-    from soulstruct.containers import Binder
-    from soulstruct.flver import FLVER
-    from soulstruct.blender.flver.utilities import get_flvers_from_binder
-    from soulstruct.blender.flver.models.types.bl_flver.core import BlenderFLVER
 
-    game_root = Path(
-        os.environ.get(
-            "NR_GAME_ROOT",
-            r"s:\SteamLibrary\steamapps\common\ELDEN RING NIGHTREIGN\Game",
-        )
-    )
-    chrbnd = Path(
-        os.environ.get(
-            "NR_CHRBND",
-            game_root / "chr" / "c7720.chrbnd.dcx",
-        )
-    )
+    game_root = Path(os.environ.get("NR_GAME_ROOT", DEFAULT_GAME_ROOT))
+    project_root = Path(os.environ.get("NR_PROJECT_ROOT", game_root))
+    chr_id = os.environ.get("NR_CHR", "c7720")
+    chrbnd = project_root / "chr" / f"{chr_id}.chrbnd.dcx"
     if not chrbnd.is_file():
         print(f"FAIL: CHRBND not found: {chrbnd}")
         return 1
 
-    _register_minimal_scene_props()
-
-    settings = bpy.context.scene.soulstruct_settings
-    settings.game_enum = "ELDEN_RING"
-    settings.eldenring_game_root_str = str(game_root)
-
-    imp = bpy.context.scene.flver_import_settings
-    imp.import_textures = True
-    imp.merge_mesh_vertices = True
-    imp.omit_default_bone = False
-    imp.add_name_suffix = False
-
-    print(f"Loading binder: {chrbnd}")
-    binder = Binder.from_path(chrbnd)
-    flvers = get_flvers_from_binder(binder, chrbnd, allow_multiple=True)
-    if not flvers:
-        print("FAIL: no FLVER entries in binder")
-        return 1
-
-    flver = flvers[0]
+    _setup_addon()
+    settings = _configure(game_root, project_root)
+    print(f"read_flvers_with_pyrelink={settings.read_flvers_with_pyrelink} use_pyrelink_flver (export)={settings.use_pyrelink_flver}")
+    _clear_scene()
+    mesh, armature = _import_character(chr_id, project_root)
+    missing = [i.name for i in bpy.data.images if tuple(i.size) == (1, 1)]
     print(
-        f"FLVER: version={flver.version.name} bones={len(flver.bones)} meshes={len(flver.meshes)} "
-        f"any_dynamic={flver.any_dynamic()} all_dynamic={flver.all_dynamic()}"
+        f"OK import: mesh={mesh.name} verts/faces/materials={_mesh_stats(mesh)} bones={len(armature.data.bones)} "
+        f"images={len(bpy.data.images)} placeholder_images={len(missing)}"
     )
 
-    op = _make_log_op()
-    try:
-        bl_flver = BlenderFLVER.new_from_soulstruct_obj(
-            op,
-            bpy.context,
-            flver,
-            name="c7720",
-            image_import_manager=None,
-        )
-    except Exception:
-        traceback.print_exc()
-        print("FAIL: BlenderFLVER.new_from_soulstruct_obj raised")
-        return 1
+    if os.environ.get("NR_EXPORT", "1") != "1":
+        return 0
 
-    mesh = bl_flver.mesh
-    arm = bl_flver.armature
-    print(
-        f"OK: mesh={mesh.name} verts={len(mesh.data.vertices)} "
-        f"armature={arm.name if arm else None} bones={len(arm.data.bones) if arm else 0}"
-    )
+    with tempfile.TemporaryDirectory(prefix="nr_flver_export_") as temp:
+        temp_project = Path(temp, "project")
+        _copy_character_files(project_root, chr_id, temp_project)
+        _configure(game_root, temp_project)
+        _clear_scene()
+        mesh, armature = _import_character(chr_id, temp_project)
+
+        stan = bpy.context.scene.stan_tools_settings
+        masked = False
+        if os.environ.get("NR_DRAW_MASK", "1") != "1":
+            print("draw mask skipped (NR_DRAW_MASK=0)")
+        elif stan.refresh_npc_param_list(bpy.context, chr_id):
+            bpy.context.view_layer.objects.active = mesh
+            result = bpy.ops.stan_tools.apply_npc_param_draw_mask()
+            masked = result == {"FINISHED"}
+            print(f"draw mask applied: {result}")
+        else:
+            print("no NpcParam rows for this character; exporting without a draw mask")
+
+        before = _mesh_stats(mesh)
+        for obj in bpy.context.selected_objects:
+            obj.select_set(False)
+        mesh.select_set(True)
+        bpy.context.view_layer.objects.active = mesh
+        result = bpy.ops.export_scene.character_flver()
+        if result != {"FINISHED"}:
+            print(f"FAIL: export_scene.character_flver returned {result}")
+            return 1
+        from soulstruct.containers import Binder
+
+        exported = Binder.from_path(temp_project / "chr" / f"{chr_id}.chrbnd.dcx")
+        flver_data = exported.find_entries_by_name_regex(r".*\.flver(\.dcx)?")[0].get_uncompressed_data()
+        print(f"exported FLVER version: 0x{int.from_bytes(flver_data[8:12], 'little'):x}")
+
+        _clear_scene()
+        mesh, armature = _import_character(chr_id, temp_project)
+        after = _mesh_stats(mesh)
+        print(f"OK export round trip (draw mask: {masked}): before={before} after={after}")
+        if before[1:] != after[1:]:
+            print("FAIL: face or material count changed in the FLVER export round trip")
+            return 1
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # `multiprocessing` workers re-import this file without running it
     try:
         raise SystemExit(main())
     except SystemExit:
