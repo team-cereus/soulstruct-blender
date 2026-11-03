@@ -9,6 +9,7 @@ import bpy
 from mathutils import Matrix, Vector
 
 from soulstruct.containers import Binder
+from soulstruct.eldenring.models.geombnd import aeg_geombnd_relative_path, find_aeg_geombnd
 from soulstruct.flver import FLVER
 from soulstruct.nightreign.maps.poi_map_pieces import find_msb_path, iter_map_piece_instances, resolve_msb_stem
 
@@ -35,7 +36,7 @@ from .poi_markers import (
     import_poi_tile_catalog_empty,
 )
 
-_MAPBND_RE = re.compile(r"\.mapbnd(\.dcx)?(\.bak)?$", re.IGNORECASE)
+_FLVER_BINDER_RE = re.compile(r"\.(mapbnd|geombnd)(\.dcx)?(\.bak)?$", re.IGNORECASE)
 
 
 def _poi_search_roots(settings: SoulstructSettings) -> tuple[GameStructure, ...]:
@@ -188,6 +189,65 @@ def _resolve_map_piece_flver_path(
     return None
 
 
+def _resolve_aeg_geombnd_path(settings: SoulstructSettings, model_name: str) -> Path | None:
+    """Resolve ``AEG001_290`` to ``asset/aeg/aeg001/aeg001_290.geombnd.dcx`` across POI import roots."""
+    for root in _poi_search_roots(settings):
+        found = find_aeg_geombnd(root.root, model_name)
+        if found is not None:
+            return found
+    return None
+
+
+def _resolve_model_source_path(
+    settings: SoulstructSettings,
+    map_stem: str,
+    model_name: str,
+) -> Path | None:
+    """Resolve a map-piece FLVER or AEG GEOMBND for an MSB model name."""
+    if model_name.lower().startswith("aeg"):
+        path = _resolve_aeg_geombnd_path(settings, model_name)
+        if path is not None:
+            return path
+    return _resolve_map_piece_flver_path(settings, map_stem, model_name)
+
+
+def _poi_max_unique_models(context: bpy.types.Context | None) -> int:
+    """0 means import every unique model."""
+    if context is None:
+        return 0
+    stan = getattr(context.scene, "stan_tools_settings", None)
+    if stan is None:
+        return 0
+    return int(getattr(stan, "poi_max_unique_aeg_models", 0) or 0)
+
+
+def _linked_instance_hierarchy(
+    template: bpy.types.Object,
+    collection: bpy.types.Collection,
+    name: str,
+) -> bpy.types.Object:
+    """Copy ``template`` and its direct children, sharing mesh/armature data."""
+    new_root = template.copy()
+    new_root.name = name
+    if new_root.name not in collection.objects:
+        try:
+            collection.objects.link(new_root)
+        except RuntimeError:
+            pass
+    for child in template.children:
+        new_child = child.copy()
+        try:
+            collection.objects.link(new_child)
+        except RuntimeError:
+            pass
+        new_child.parent = new_root
+        new_child.matrix_parent_inverse = child.matrix_parent_inverse.copy()
+        for mod in new_child.modifiers:
+            if getattr(mod, "object", None) is template:
+                mod.object = new_root
+    return new_root
+
+
 def _apply_piece_transform(
     obj: bpy.types.Object,
     location_bl: Vector,
@@ -238,9 +298,9 @@ def _import_flver_at_transform(
         )
     except Exception as ex:
         tb = traceback.format_exc()
-        stan_warning(operator, f"Map piece FLVER import failed for {bl_name!r}:\n{tb}")
+        stan_warning(operator, f"FLVER import failed for {bl_name!r}:\n{tb}")
         if operator is not None:
-            operator.error(f"Cannot import map piece FLVER {bl_name}: {type(ex).__name__}: {ex}")
+            operator.error(f"Cannot import FLVER {bl_name}: {type(ex).__name__}: {ex}")
         return None
 
     root_obj = bl_flver.armature if bl_flver.armature is not None else bl_flver.mesh
@@ -260,7 +320,10 @@ def import_poi_tile_from_msb(
     msb_stem: str = "",
     lookup: str = "auto",
 ) -> bpy.types.Object | None:
-    """Import map piece FLVERs from a tile MSB at transforms relative to ``location_bl``."""
+    """Import MSB map pieces and AEG assets at transforms relative to ``location_bl``.
+
+    Unique models are imported once; further MSB parts share mesh data (linked instances).
+    """
     msb_path = find_msb_for_tile(settings, tile_str, msb_stem)
     if msb_path is None:
         return None
@@ -276,7 +339,7 @@ def import_poi_tile_from_msb(
     map_stem = resolve_msb_stem(tile_str or msb_stem or msb_path.stem.split(".")[0])
     pieces = iter_map_piece_instances(msb)
     if not pieces:
-        stan_warning(operator, f"No map pieces in {msb_path.name}.")
+        stan_warning(operator, f"No map pieces or assets in {msb_path.name}.")
         return None
 
     parent = bpy.data.objects.new(f"msb_tile_{name_label}", None)
@@ -286,35 +349,80 @@ def import_poi_tile_from_msb(
     parent["stan_poi_map_tile"] = name_label
     parent["map_tile_str"] = tile_str
 
+    templates: dict[str, bpy.types.Object] = {}
+    missing: set[str] = set()
     imported = 0
+    instance_index = 0
+    max_unique = _poi_max_unique_models(context)
+
     for model_name, translate, rotate, scale in pieces:
-        if not model_name:
+        if not model_name or model_name in missing:
             continue
-        flver_path = _resolve_map_piece_flver_path(settings, map_stem, model_name)
-        if flver_path is None:
-            stan_warning(operator, f"No FLVER for map piece model {model_name!r} under {map_stem}.")
-            continue
-        piece_obj = _import_flver_at_transform(
-            operator,
-            context,
-            flver_path,
-            collection,
-            f"{model_name}_{name_label}",
-            location_bl,
-            translate,
-            rotate,
-            scale,
-        )
-        if piece_obj is not None:
+
+        template = templates.get(model_name)
+        if template is None:
+            if max_unique > 0 and len(templates) >= max_unique:
+                continue
+            source_path = _resolve_model_source_path(settings, map_stem, model_name)
+            if source_path is None:
+                missing.add(model_name)
+                if model_name.lower().startswith("aeg"):
+                    try:
+                        expected = aeg_geombnd_relative_path(model_name)
+                    except ValueError:
+                        expected = Path(f"asset/aeg/{model_name.lower()[:6]}/{model_name.lower()}.geombnd.dcx")
+                    stan_warning(
+                        operator,
+                        f"No GEOMBND for asset {model_name!r} (expected {expected}).",
+                    )
+                else:
+                    stan_warning(
+                        operator,
+                        f"No FLVER for map piece model {model_name!r} under {map_stem}.",
+                    )
+                continue
+            piece_obj = _import_flver_at_transform(
+                operator,
+                context,
+                source_path,
+                collection,
+                f"{model_name}_{name_label}",
+                location_bl,
+                translate,
+                rotate,
+                scale,
+            )
+            if piece_obj is None:
+                missing.add(model_name)
+                continue
             piece_obj.parent = parent
+            templates[model_name] = piece_obj
             imported += 1
+            continue
+
+        instance_index += 1
+        inst = _linked_instance_hierarchy(
+            template,
+            collection,
+            f"{model_name}_{name_label}_{instance_index:04d}",
+        )
+        _apply_piece_transform(inst, location_bl, translate, rotate, scale)
+        inst.parent = parent
+        imported += 1
 
     if imported == 0:
         bpy.data.objects.remove(parent, do_unlink=True)
-        stan_warning(operator, f"MSB {msb_path.name} has map pieces but no importable FLVERs were found.")
+        stan_warning(
+            operator,
+            f"MSB {msb_path.name} has parts but no importable FLVERs were found.",
+        )
         return None
 
-    stan_info(operator, f"Imported {imported} map piece(s) for {name_label} from {msb_path.name}.")
+    stan_info(
+        operator,
+        f"Imported {imported} part(s) ({len(templates)} unique model(s)) for {name_label} "
+        f"from {msb_path.name}.",
+    )
     return parent
 
 def find_map_piece_sources(
@@ -339,14 +447,17 @@ def find_map_piece_sources(
 
 
 def _load_first_flver(source_path: Path) -> tuple[str, FLVER] | None:
-    if _MAPBND_RE.search(source_path.name):
+    if _FLVER_BINDER_RE.search(source_path.name):
         binder = Binder.from_path(source_path)
         flvers = get_flvers_from_binder(binder, source_path, allow_multiple=True)
-        for flver in flvers:
+        source_stem = source_path.name.split(".")[0].lower()
+        matching = [flver for flver in flvers if flver.path_minimal_stem.lower() == source_stem]
+        pool = matching or list(flvers)
+        for flver in pool:
             if flver.meshes:
                 return flver.path_minimal_stem, flver
-        if flvers:
-            return flvers[0].path_minimal_stem, flvers[0]
+        if pool:
+            return pool[0].path_minimal_stem, pool[0]
         return None
 
     flver = FLVER.from_path(source_path)
@@ -375,46 +486,11 @@ def import_poi_tile_mesh(
     lookup: str = "poi_tile",
     msb_stem: str = "",
 ) -> bpy.types.Object | None:
-    """Import map pieces for a POI slot tile at ``location_bl`` from loose FLVERs or MSB."""
-    sources = find_map_piece_sources(settings, map_tile_str, msb_stem=msb_stem, lookup=lookup)
-    if sources:
-        loaded = _load_first_flver(sources[0])
-        if loaded is None:
-            stan_warning(operator, f"No FLVER meshes in {sources[0].name}.")
-            return None
+    """Import AEG assets / map pieces for a POI slot tile at ``location_bl``.
 
-        bl_name, flver = loaded
-        import_settings = context.scene.flver_import_settings
-        image_import_manager = None
-        if import_settings.import_textures:
-            image_import_manager = ImageImportManager(operator, context)
-            image_import_manager.find_flver_textures(sources[0])
-
-        try:
-            bl_flver = BlenderFLVER.new_from_soulstruct_obj(
-                operator,
-                context,
-                flver,
-                name=f"{bl_name}_{name_label}",
-                image_import_manager=image_import_manager,
-                collection=collection,
-            )
-        except Exception as ex:
-            tb = traceback.format_exc()
-            stan_warning(operator, f"Map tile FLVER import failed for {bl_name!r}:\n{tb}")
-            if operator is not None:
-                operator.error(f"Cannot import map tile FLVER {bl_name}: {type(ex).__name__}: {ex}")
-            return None
-
-        root_obj = bl_flver.armature if bl_flver.armature is not None else bl_flver.mesh
-        root_obj.location = location_bl
-        root_obj["stan_poi_map_tile"] = name_label
-        root_obj["map_tile_str"] = map_tile_str
-
-        stan_info(operator, f"Imported map tile {name_label} from {sources[0].name}.")
-        return root_obj
-
-    return import_poi_tile_from_msb(
+    Nightreign POI tiles are MSB asset (AEG) maps; prefer MSB over a single loose mapbnd.
+    """
+    msb_obj = import_poi_tile_from_msb(
         operator,
         context,
         settings,
@@ -425,6 +501,48 @@ def import_poi_tile_mesh(
         msb_stem=msb_stem,
         lookup=lookup,
     )
+    if msb_obj is not None:
+        return msb_obj
+
+    sources = find_map_piece_sources(settings, map_tile_str, msb_stem=msb_stem, lookup=lookup)
+    if not sources:
+        return None
+
+    loaded = _load_first_flver(sources[0])
+    if loaded is None:
+        stan_warning(operator, f"No FLVER meshes in {sources[0].name}.")
+        return None
+
+    bl_name, flver = loaded
+    import_settings = context.scene.flver_import_settings
+    image_import_manager = None
+    if import_settings.import_textures:
+        image_import_manager = ImageImportManager(operator, context)
+        image_import_manager.find_flver_textures(sources[0])
+
+    try:
+        bl_flver = BlenderFLVER.new_from_soulstruct_obj(
+            operator,
+            context,
+            flver,
+            name=f"{bl_name}_{name_label}",
+            image_import_manager=image_import_manager,
+            collection=collection,
+        )
+    except Exception as ex:
+        tb = traceback.format_exc()
+        stan_warning(operator, f"Map tile FLVER import failed for {bl_name!r}:\n{tb}")
+        if operator is not None:
+            operator.error(f"Cannot import map tile FLVER {bl_name}: {type(ex).__name__}: {ex}")
+        return None
+
+    root_obj = bl_flver.armature if bl_flver.armature is not None else bl_flver.mesh
+    root_obj.location = location_bl
+    root_obj["stan_poi_map_tile"] = name_label
+    root_obj["map_tile_str"] = map_tile_str
+
+    stan_info(operator, f"Imported map tile {name_label} from {sources[0].name}.")
+    return root_obj
 
 
 def import_map_tile_at_empty(

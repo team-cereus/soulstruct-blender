@@ -226,7 +226,7 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
     nightreign_unpack_staging_str: bpy.props.StringProperty(
         name="Nightreign Unpack Staging",
         description="Optional extra import root with UXM/Smithbox loose files (map, chr, parts)",
-        default=r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack",
+        default=r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack-decrypted",
         subtype="DIR_PATH",
     )
     # endregion

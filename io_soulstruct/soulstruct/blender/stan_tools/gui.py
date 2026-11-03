@@ -354,8 +354,10 @@ class StanMapPoiPanel(_StanToolsPanel):
             layout.prop(
                 stan,
                 "poi_import_map_tiles",
-                text="Import Map Tiles (FLVER or mapstudio MSB)",
+                text="Import Map Tiles (AEG assets or map pieces)",
             )
+            if stan.poi_import_map_tiles:
+                layout.prop(stan, "poi_max_unique_aeg_models")
 
         row = layout.row(align=True)
         row.operator(StanImportPoiMarkers.bl_idname, icon="IMPORT")

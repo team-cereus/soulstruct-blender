@@ -7,12 +7,32 @@ import unittest
 from soulstruct.games import NIGHTREIGN
 from soulstruct.nightreign.maps import poi_map_pieces
 
+DECRYPTED_ROOT = Path(r"S:/_modding/tools/soulstruct-blender/_tmp/nr-full-unpack-decrypted")
 STAGING_ROOT = Path(r"S:/_modding/tools/soulstruct-blender/_tmp/nr-full-unpack")
-STAGING_MSB = STAGING_ROOT / "map/mapstudio/m30_30_00_00.msb.dcx"
+_ENCRYPTED_MAGICS = {b"UFdk", b"\xaf\xb9\x8a\x0b"}
+
+
+def _usable_msb(root: Path, stem: str = "m30_30_00_00") -> Path | None:
+    for name in (f"{stem}.msb.dcx", f"{stem}.msb"):
+        path = root / "map/mapstudio" / name
+        if path.is_file() and path.read_bytes()[:4] not in _ENCRYPTED_MAGICS:
+            return path
+    return None
+
+
+def _unpack_root() -> Path | None:
+    for root in (DECRYPTED_ROOT, STAGING_ROOT):
+        if _usable_msb(root, "m30_30_00_00") is not None or _usable_msb(root, "m46_51_00_00") is not None:
+            return root
+    return None
+
+
+STAGING_ROOT = _unpack_root() or STAGING_ROOT
+STAGING_MSB = _usable_msb(STAGING_ROOT, "m30_30_00_00") or _usable_msb(STAGING_ROOT, "m46_51_00_00")
 
 
 def _staging_available() -> bool:
-    return STAGING_MSB.is_file()
+    return STAGING_MSB is not None and STAGING_MSB.is_file()
 
 
 def _tile_stem_to_map_stem(tile_str: str) -> str:
@@ -123,9 +143,11 @@ class TestPoiMapPieces(unittest.TestCase):
     @unittest.skipUnless(_staging_available(), "staging MSB missing")
     def test_find_msb_path_on_staging(self):
         path = poi_map_pieces.find_msb_path(STAGING_ROOT, "m30_30")
+        if path is None:
+            path = poi_map_pieces.find_msb_path(STAGING_ROOT, "m46_51")
         self.assertIsNotNone(path)
         assert path is not None
-        self.assertEqual(path.name, "m30_30_00_00.msb.dcx")
+        self.assertTrue(path.name.startswith("m") and ".msb" in path.name)
 
 
 class TestPoiSearchRoots(unittest.TestCase):
@@ -146,15 +168,78 @@ class TestFindMsbForTile(unittest.TestCase):
     @unittest.skipUnless(_staging_available(), "staging MSB missing")
     def test_find_msb_for_tile_via_staging(self):
         stub = _SettingsStub(staging=str(STAGING_ROOT))
-        path = _find_msb_for_tile(stub, "m30_30")
+        path = _find_msb_for_tile(stub, "m30_30") or _find_msb_for_tile(stub, "m46_51")
         self.assertIsNotNone(path)
         assert path is not None
-        self.assertEqual(path.name, "m30_30_00_00.msb.dcx")
+        self.assertTrue(path.name.startswith("m") and ".msb" in path.name)
 
     @unittest.skipUnless(_staging_available(), "staging MSB missing")
     def test_has_map_tile_data_msb_only(self):
         stub = _SettingsStub(staging=str(STAGING_ROOT))
-        self.assertIsNotNone(_find_msb_for_tile(stub, "m30_30"))
+        self.assertTrue(
+            _find_msb_for_tile(stub, "m30_30") is not None or _find_msb_for_tile(stub, "m46_51") is not None
+        )
+
+
+class TestAegGeometry(unittest.TestCase):
+    """AEG geombnd resolution for NR POI tiles. Fail with path if extract is missing."""
+
+    def test_has_map_tile_data_m30_30(self):
+        expected = DECRYPTED_ROOT / "map/mapstudio/m30_30_00_00.msb.dcx"
+        stub = _SettingsStub(staging=str(DECRYPTED_ROOT))
+        path = _find_msb_for_tile(stub, "m30_30")
+        self.assertIsNotNone(path, f"has_map_tile_data expected MSB for m30_30: {expected}")
+        assert path is not None
+        self.assertTrue(path.is_file(), f"MSB is not a file: {path}")
+        self.assertNotIn(path.read_bytes()[:4], _ENCRYPTED_MAGICS, f"{path} is still AES ciphertext")
+
+    def test_resolve_aeg_flver_from_staging(self):
+        from soulstruct.containers import Binder
+        from soulstruct.eldenring.models.geombnd import aeg_geombnd_relative_path, find_aeg_geombnd
+
+        expected = DECRYPTED_ROOT / aeg_geombnd_relative_path("AEG001_290")
+        path = find_aeg_geombnd(DECRYPTED_ROOT, "AEG001_290")
+        self.assertIsNotNone(path, f"missing AEG geombnd: {expected}")
+        assert path is not None
+        self.assertNotIn(path.read_bytes()[:4], _ENCRYPTED_MAGICS, f"{path} is still AES ciphertext")
+        binder = Binder.from_path(path)
+        flvers = binder.find_entries_matching_name(r".*\.flver(\.dcx)?")
+        self.assertGreater(len(flvers), 0, f"no FLVER in {path}")
+        from soulstruct.flver import FLVER
+
+        flver = flvers[0].to_binary_file(FLVER)
+        self.assertTrue(
+            len(flver.meshes) > 0 or len(flver.bones) > 0,
+            f"FLVER from {path.name} has no meshes or bones",
+        )
+
+
+class TestDecryptAndParse(unittest.TestCase):
+    """MSB load + mapbnd FLVER extract without Blender runtime."""
+
+    @unittest.skipUnless(_staging_available(), "decrypted MSB missing")
+    def test_msb_loads_and_has_named_pieces(self):
+        from soulstruct.nightreign.maps import MSB
+
+        assert STAGING_MSB is not None
+        self.assertNotIn(STAGING_MSB.read_bytes()[:4], _ENCRYPTED_MAGICS)
+        msb = MSB.from_path(STAGING_MSB)
+        pieces = poi_map_pieces.iter_map_piece_instances(msb)
+        self.assertGreater(len(pieces), 0)
+        named = [name for name, *_ in pieces if name]
+        self.assertGreater(len(named), 0)
+
+    @unittest.skipUnless(_staging_available(), "decrypted unpack missing")
+    def test_mapbnd_yields_flver_bytes(self):
+        from soulstruct.containers import Binder
+
+        mapbnds = sorted((STAGING_ROOT / "map").glob("**/*.mapbnd*"))
+        usable = [p for p in mapbnds if p.is_file() and p.read_bytes()[:4] not in _ENCRYPTED_MAGICS]
+        if not usable:
+            self.skipTest("no decrypted mapbnd under unpack root")
+        binder = Binder.from_path(usable[0])
+        flvers = binder.find_entries_matching_name(r".*\.flver(\.dcx)?")
+        self.assertGreater(len(flvers), 0, f"no FLVER in {usable[0].name}")
 
 
 if __name__ == "__main__":

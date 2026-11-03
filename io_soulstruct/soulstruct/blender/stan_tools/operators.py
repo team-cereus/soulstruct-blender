@@ -59,7 +59,9 @@ class AutoDetectGameDirectory(LoggingOperator):
             self.info(f"Set mod folder: {mod_path}")
 
         if settings.is_game(NIGHTREIGN) and not settings.nightreign_unpack_staging_str:
-            default_staging = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack")
+            decrypted = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack-decrypted")
+            staging = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack")
+            default_staging = decrypted if decrypted.is_dir() else staging
             if default_staging.is_dir():
                 settings.nightreign_unpack_staging_str = str(default_staging)
                 self.info(f"Set unpack staging: {default_staging}")

@@ -99,11 +99,22 @@ class StanToolsSettings(SoulstructPropertyGroup):
     poi_import_map_tiles: bpy.props.BoolProperty(
         name="Import POI Tile FLVERs",
         description=(
-            "Load POI slot map piece geometry (m30_30, m46_51, …) from unpacked map/ in Game Root. "
-            "Seed layout: one mesh per unique tile at each POI attach position. "
+            "Load POI slot geometry from unpacked map pieces and Nightreign AEG assets "
+            "(asset/aeg/...geombnd.dcx). Unique AEG models are imported once and instanced. "
             "Tile catalog: one tile at a time at origin (Prev/Next to browse)"
         ),
         default=True,
+    )
+
+    poi_max_unique_aeg_models: bpy.props.IntProperty(
+        name="Max Unique AEG Models",
+        description=(
+            "Cap unique AEG/map-piece models imported per POI tile (0 = all unique models). "
+            "Each unique model is imported once and instanced at MSB transforms"
+        ),
+        default=0,
+        min=0,
+        max=4096,
     )
 
     poi_catalog_tile_ids: bpy.props.StringProperty(
