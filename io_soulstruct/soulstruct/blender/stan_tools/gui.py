@@ -12,6 +12,7 @@ __all__ = [
 from pathlib import Path
 
 import bpy
+import pyrelink.core as pyre_core
 
 from ..bpy_base.panel import SoulstructPanel
 from ..general.properties import SoulstructSettings
@@ -136,6 +137,16 @@ class StanSetupPanel(_StanToolsPanel):
             layout.label(text="chr\\ missing — set Game Root to unpacked .../Game", icon="ERROR")
         else:
             layout.label(text="Set Game Root or use Auto-Detect", icon="ERROR")
+
+        if settings.game_config.requires_oodle and not pyre_core.is_oodle_available():
+            text_with_tooltip(
+                layout,
+                "oo2core_6_win64.dll missing",
+                "Game files can't be opened without it. Nightreign doesn't include it (its oo2core_9 doesn't work "
+                "here); it comes with Elden Ring or Sekiro.\n"
+                "Copy it into your Project Root or Game Root folder and restart Blender.",
+                icon="ERROR",
+            )
 
         if settings.is_game(NIGHTREIGN):
             box = layout.box()

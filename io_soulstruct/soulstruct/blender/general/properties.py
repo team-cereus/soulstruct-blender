@@ -23,7 +23,7 @@ from soulstruct.base.base_binary_file import BaseBinaryFile
 from soulstruct.containers import Binder
 from soulstruct.dcx import DCXType, compress, decompress
 from soulstruct.games import *
-from soulstruct.utilities.files import create_bak
+from soulstruct.utilities.files import SOULSTRUCT_PATH, create_bak
 
 import pyrelink.core as pyre_core
 import pyrelink.flver as pyre_flver
@@ -401,7 +401,8 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
             return False
         if pyre_core.is_oodle_available():
             return True
-        for root_path in (self.game_root_path, self.project_root_path):
+        # Nightreign does not ship this DLL, so also check next to soulstruct, where the installer copies it.
+        for root_path in (self.game_root_path, self.project_root_path, Path(SOULSTRUCT_PATH("."))):
             if root_path and root_path.is_dir() and pyre_core.load_oodle_dll(str(root_path)):
                 _LOGGER.info(f"Loaded Oodle DLL from: {root_path}")
                 return True

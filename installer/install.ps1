@@ -135,9 +135,9 @@ function Copy-OodleDll {
             }
         }
     }
-    Write-Note "No Elden Ring / Nightreign install found for oo2core_6_win64.dll."
-    Write-Note "Elden Ring / Nightreign files will not open until you copy it from the game's Game folder to:"
-    Write-Note "  $target"
+    Write-Host "    oo2core_6_win64.dll not found. It comes with Elden Ring or Sekiro, NOT Nightreign." -ForegroundColor Yellow
+    Write-Host "    Elden Ring / Nightreign files will not open until you copy it to:" -ForegroundColor Yellow
+    Write-Host "      $target" -ForegroundColor Yellow
 }
 
 # blender.exe is not long-path aware, so its Python cannot open a file whose full path is 260+ characters, even with

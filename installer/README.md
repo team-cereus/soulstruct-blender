@@ -41,8 +41,9 @@ Every time Blender starts, it checks for a new version in the background. When o
 - **Re-run the install command.** It is safe to run any number of times and repairs a broken install.
 - **See what is going on:** in Blender, **Window → Toggle System Console**. Lines from the updater start with
   `[Stan's Tools updater]`.
-- **"oo2core_6_win64.dll" errors:** the installer could not find Elden Ring / Nightreign. Copy
-  `oo2core_6_win64.dll` from the game's `Game` folder to
+- **"oo2core_6_win64.dll" errors:** this file comes with Elden Ring or Sekiro. Nightreign does not include it, and
+  its `oo2core_9_win64.dll` crashes if renamed. Copy `oo2core_6_win64.dll` into your Project Root (for reading game
+  files) and into
   `%LOCALAPPDATA%\StanTools\soulstruct-blender\io_soulstruct_lib\soulstruct\src\soulstruct\`.
 
 ## Uninstall

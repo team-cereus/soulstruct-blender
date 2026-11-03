@@ -66,11 +66,12 @@ class LoggingOperator(bpy.types.Operator):
         if report is not False and _LOGGER.blender_log_level <= logging.INFO:
             self.report({"INFO"}, msg)
 
-    def warning(self, msg: str, report: bool | None = None):
-        """Logged and optionally reported in Blender."""
+    def warning(self, msg: str, report: bool | None = None) -> set[str]:
+        """Logged and optionally reported in Blender. Returns {'CANCELLED'}, as many `execute()`s return this."""
         _LOGGER.warning(msg, stacklevel=2)
         if report is not False and _LOGGER.blender_log_level <= logging.WARNING:
             self.report({"WARNING"}, msg)
+        return {"CANCELLED"}
 
     def error(self, msg: str) -> set[str]:
         """Logged and reported in Blender. Returns {'CANCELLED'} for easy `execute()` return use."""
