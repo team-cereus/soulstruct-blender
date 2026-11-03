@@ -49,6 +49,7 @@ from .npc_param import _resolve_npc_param_xml_path
 from .regulation_bin import resolve_regulation_bin_dir
 from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
+from .nr_unpack import StanUnpackNightreign, unpack_status
 from ..base.register import io_soulstruct_panel
 
 STAN_TOOLS_CATEGORY = "Stan's Tools"
@@ -120,10 +121,24 @@ class StanSetupPanel(_StanToolsPanel):
         if chr_dirs:
             count = sum(1 for d in chr_dirs for _ in d.glob("c*.chrbnd*"))
             layout.label(text=f"chr\\ found: {count} binder(s) in {len(chr_dirs)} folder(s)", icon="CHECKMARK")
+        elif settings.is_game(NIGHTREIGN):
+            layout.label(text="chr\\ missing — use Unpack Nightreign Files below", icon="ERROR")
         elif settings.game_root_path or settings.project_root_path:
             layout.label(text="chr\\ missing — set Game Root to unpacked .../Game", icon="ERROR")
         else:
             layout.label(text="Set Game Root or use Auto-Detect", icon="ERROR")
+
+        if settings.is_game(NIGHTREIGN):
+            box = layout.box()
+            box.label(text="Unpacked Game Files (no UXM needed)", icon="PACKAGE")
+            box.prop(stan, "nr_unpack_chr")
+            box.prop(stan, "nr_unpack_parts")
+            box.prop(stan, "nr_unpack_map")
+            box.label(text="Unpack Folder (empty = AppData\\Local\\StanTools):")
+            box.prop(stan, "nr_unpack_dir", text="")
+            box.operator(StanUnpackNightreign.bl_idname, icon="IMPORT")
+            if status := unpack_status():
+                box.label(text=status, icon="ERROR" if status.startswith("Unpack failed") else "INFO")
 
 
 @io_soulstruct_panel

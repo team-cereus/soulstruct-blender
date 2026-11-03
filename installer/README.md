@@ -5,8 +5,9 @@ Windows only. Takes about five minutes, and updates install themselves after tha
 ## Before you start
 
 - **Blender 5.1 or newer**, from <https://www.blender.org/download/>. Start it once, then close it.
-- **Elden Ring or Nightreign** installed through Steam, with the game files unpacked (UXM), so `Game\chr\`
-  holds `.chrbnd.dcx` / `.anibnd.dcx` files.
+- **Nightreign or Elden Ring** installed through Steam. Nightreign does not need to be unpacked: Stan's Tools
+  does that for you (step 5 below). Elden Ring still needs UXM, so `Game\chr\` holds `.chrbnd.dcx` files.
+- Free disk space for Nightreign's unpacked files: about 6 GB for characters and weapons, 6 GB more for maps.
 - Internet access for the install and for Blender's first launch afterwards.
 
 You do not need Git or Python: the installer installs Git if it is missing, and Blender brings its own Python.
@@ -23,6 +24,9 @@ You do not need Git or Python: the installer installs Git if it is missing, and 
 3. Start Blender. On the first launch it turns the add-on on and downloads its Python packages. Blender
    freezes for about a minute while this happens.
 4. In the 3D Viewport press **N** and open the **Stan's Tools** tab. Set **Game** and click **Auto-Detect**.
+5. Nightreign only: in **Setup → Unpacked Game Files**, tick what you want and click **Unpack Nightreign Files**.
+   It copies those files out of the game (a few minutes; the game itself is not changed and stays playable
+   online) and points Stan's Tools at them. Run it again after a game update to pick up new files.
 
 If the add-on did not switch on (no internet on the first launch, for example), it tries again the next time
 Blender starts. You can also enable it yourself in **Edit → Preferences → Add-ons**: search "Soulstruct".

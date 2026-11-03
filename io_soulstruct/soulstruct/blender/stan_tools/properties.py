@@ -69,6 +69,22 @@ class StanToolsSettings(SoulstructPropertyGroup):
         default="",
     )
 
+    nr_unpack_dir: bpy.props.StringProperty(
+        name="Unpack Folder",
+        description="Where 'Unpack Nightreign Files' puts the extracted files (empty: %LOCALAPPDATA%\\StanTools\\nr-unpack)",
+        subtype="DIR_PATH",
+        default="",
+    )
+    nr_unpack_chr: bpy.props.BoolProperty(
+        name="Characters (2.8 GB)", description="Unpack chr/ (characters, their textures and animations)", default=True
+    )
+    nr_unpack_parts: bpy.props.BoolProperty(
+        name="Weapons and Armor (3.0 GB)", description="Unpack parts/ (weapons and equipment)", default=True
+    )
+    nr_unpack_map: bpy.props.BoolProperty(
+        name="Maps (6.2 GB)", description="Unpack map/ (needed for the Map POIs panel)", default=False
+    )
+
     poi_display_mode: bpy.props.EnumProperty(
         name="POI Display",
         description="Which Nightreign POI data to import as Empty markers",
