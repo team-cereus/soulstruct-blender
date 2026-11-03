@@ -62,8 +62,9 @@ function Install-GitIfMissing {
     return $git
 }
 
+# soulstruct-havok has generated type modules with ~105-char names; under %LOCALAPPDATA% they need long path support.
 function Invoke-Git([string[]]$GitArgs) {
-    & $script:Git @GitArgs
+    & $script:Git -c core.longpaths=true @GitArgs
     if ($LASTEXITCODE -ne 0) { throw "git $($GitArgs -join ' ') failed (exit $LASTEXITCODE)" }
 }
 
@@ -121,8 +122,10 @@ function Copy-OodleDll {
             if (Test-Path $dll) {
                 Copy-Item $dll $target
                 # Keep the copied DLL out of `git status` so the updater still sees a clean tree.
-                $exclude = & $script:Git -C (Join-Path $InstallDir "io_soulstruct_lib\soulstruct") rev-parse --git-path info/exclude
-                $exclude = Join-Path (Join-Path $InstallDir "io_soulstruct_lib\soulstruct") $exclude
+                # In a submodule `--git-path` is absolute (under the parent's .git\modules), so Join-Path would mangle it.
+                $soulstructDir = Join-Path $InstallDir "io_soulstruct_lib\soulstruct"
+                $exclude = & $script:Git -C $soulstructDir rev-parse --git-path info/exclude
+                $exclude = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($soulstructDir, $exclude))
                 if (-not (Select-String -Path $exclude -Pattern "oo2core_6_win64.dll" -SimpleMatch -Quiet -ErrorAction SilentlyContinue)) {
                     New-Item -ItemType Directory -Force -Path (Split-Path $exclude) | Out-Null
                     Add-Content -Path $exclude -Value "src/soulstruct/oo2core_6_win64.dll"

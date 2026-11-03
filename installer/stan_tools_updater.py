@@ -36,8 +36,9 @@ def _log(message: str):
 
 
 def _git(repo: Path, git: str, *args: str, timeout: float = 60) -> str:
+    # `core.longpaths`: soulstruct-havok's generated type modules overflow MAX_PATH under %LOCALAPPDATA%.
     result = subprocess.run(
-        [git, "-C", str(repo), *args],
+        [git, "-C", str(repo), "-c", "core.longpaths=true", *args],
         capture_output=True, text=True, timeout=timeout, creationflags=_NO_WINDOW,
     )
     if result.returncode != 0:
@@ -164,12 +165,14 @@ def _notify_when_downloaded(thread: threading.Thread):
 
 
 def _enable_addon_once(repo: Path, state: dict):
-    """Enable the add-on on the first launch of each Blender version after install. Later toggles are the user's."""
+    """Enable the add-on on the first launch of each Blender version after install. Later toggles are the user's.
+
+    Only a successful enable is recorded, so a first launch that fails (offline pip install, ...) retries next time.
+    """
     enabled_for = state.setdefault("enabled_for", [])
     version = bpy.app.version_string
     if version in enabled_for:
         return
-    enabled_for.append(version)
 
     def enable():
         if not bpy.context.window_manager.windows:
@@ -177,10 +180,15 @@ def _enable_addon_once(repo: Path, state: dict):
         if not addon_utils.check(ADDON_MODULE)[1]:
             _log("Enabling the Soulstruct add-on. The first time downloads its Python packages (about a minute)...")
             addon_utils.enable(ADDON_MODULE, default_set=True, persistent=True)
+            if not addon_utils.check(ADDON_MODULE)[1]:
+                _log("Could not enable the add-on (see the error above). Will try again next time Blender starts.")
+                return None
             try:
                 bpy.ops.wm.save_userpref()
             except RuntimeError as ex:  # Blender's own preference auto-save covers this
                 _log(f"Could not save preferences: {ex}")
+        enabled_for.append(version)
+        _save_state(repo, state)  # `on_startup` saved before this timer ran
         return None
 
     bpy.app.timers.register(enable, first_interval=1.0)
