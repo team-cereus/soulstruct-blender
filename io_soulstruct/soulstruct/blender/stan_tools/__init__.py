@@ -42,4 +42,5 @@ from .weapon_search import StanSearchWeaponToImport
 from .weapon_anim import StanLoadWeaponAttackAnimation
 from .player_character import StanLoadPlayerCharacter
 from .nr_unpack import StanUnpackNightreign
+from . import remembered_folders  # noqa: F401 (registers its load handler)
 from .poi_editor import StanPoiEditorPick, StanPoiEditorReload, StanPoiEditorSave, StanPoiEditorStep

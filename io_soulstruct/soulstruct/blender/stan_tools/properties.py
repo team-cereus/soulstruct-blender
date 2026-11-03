@@ -194,6 +194,12 @@ class StanToolsSettings(SoulstructPropertyGroup):
     poi_edit_show_assets: bpy.props.BoolProperty(
         name="Assets", default=True, update=_update_poi_filters
     )
+    poi_edit_show_background: bpy.props.BoolProperty(
+        name="Background",
+        description="Sky / cloud domes and far-LOD terrain (huge, usually just in the way while editing)",
+        default=False,
+        update=_update_poi_filters,
+    )
     poi_edit_show_enemies: bpy.props.BoolProperty(
         name="Enemies", default=True, update=_update_poi_filters
     )

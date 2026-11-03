@@ -223,5 +223,8 @@ class StanUnpackNightreign(LoggingOperator):
         if self._maps:
             settings.nightreign_unpack_staging_str = str(self._out_dir)
         clear_cached_matdefs()  # pick up the unpacked material/ MATBINBNDs instead of the bundled ER fallback
+        from .remembered_folders import remember_folders
+
+        remember_folders(context)  # new scenes / Blender sessions get these folders back
         self.info(f"{job.status}. Project Root set to it.")
         return {"FINISHED"}

@@ -40,7 +40,10 @@ from .poi_map_tiles import _linked_instance_hierarchy, _resolve_model_source_pat
 EDITOR_ROOT = "POI Editor"
 _MODELS_COLLECTION = "POI Editor Models"
 # Collection (and filter) per MSB entry list. Regions not listed here go to "Regions".
-POI_EDITOR_CATEGORIES = ("Map Pieces", "Assets", "Enemies", "Collision", "Regions", "Other")
+POI_EDITOR_CATEGORIES = ("Map Pieces", "Assets", "Background", "Enemies", "Collision", "Regions", "Other")
+# MATBIN shader name fragments of sky / cloud domes, light shafts and far-LOD terrain: real parts, but huge (or drawn
+# as additive glows in game) and in the way while editing.
+_BACKGROUND_SHADER_HINTS = ("supercell", "[far_", "lightshaft")
 _LIST_CATEGORY = {
     "map_pieces": "Map Pieces",
     "assets": "Assets",
@@ -161,6 +164,30 @@ def _import_models(operator, context, settings, map_stem: str, model_names: set[
     }
 
 
+def _is_background_model(operator, context, template: bpy.types.Object) -> bool:
+    """True if any material of the model uses a sky/cloud or far-LOD shader (cached on the template object)."""
+    if "poi_background" not in template:
+        from ..general.matdefs import get_cached_matbinbnd
+
+        background = False
+        try:
+            matbinbnd = get_cached_matbinbnd(operator, context)
+            for obj in (template, *template.children):
+                for material in getattr(obj.data, "materials", ()):
+                    mat_def = getattr(getattr(material, "FLVER_MATERIAL", None), "mat_def_path", "")
+                    if not mat_def:
+                        continue
+                    try:
+                        shader = matbinbnd.get_matbin(Path(mat_def).name).shader_path.lower()
+                    except (KeyError, AttributeError):
+                        continue
+                    background |= any(hint in shader for hint in _BACKGROUND_SHADER_HINTS)
+        except Exception:  # classification is cosmetic; never break a load
+            pass
+        template["poi_background"] = background
+    return bool(template["poi_background"])
+
+
 def _cached_models(context: bpy.types.Context) -> dict[str, bpy.types.Object]:
     """Models imported by earlier POI loads this session, kept (hidden) so Reload / Prev / Next reuse them."""
     collection = bpy.data.collections.get(_MODELS_COLLECTION)
@@ -254,7 +281,8 @@ def load_poi_tile(operator: LoggingOperator, context: bpy.types.Context, stem: s
             model = getattr(entry, "model", None)
             template = models.get(model.name) if model is not None and list_name in _MODEL_LISTS else None
             if template is not None:
-                obj = _linked_instance_hierarchy(template, categories[category], entry.name)
+                part_category = "Background" if _is_background_model(operator, context, template) else category
+                obj = _linked_instance_hierarchy(template, categories[part_category], entry.name)
             else:
                 obj = bpy.data.objects.new(entry.name, None)
                 display, size = _EMPTY_STYLE.get(category, ("PLAIN_AXES", 1.0))
@@ -266,7 +294,7 @@ def load_poi_tile(operator: LoggingOperator, context: bpy.types.Context, stem: s
             if model is not None:
                 obj["poi_msb_model"] = model.name
             _set_object_transform(obj, entry)
-            counts[category] += 1
+            counts[obj.users_collection[0].name.removeprefix(f"{EDITOR_ROOT}: ")] += 1
     root["poi_msb_lists"] = ",".join(loaded_lists)
     summary = ", ".join(f"{n} {c.lower()}" for c, n in counts.items())
     operator.info(f"Loaded POI {stem}: {summary} ({len(models)} models cached) in {time.perf_counter() - started:.1f} s.")

@@ -72,6 +72,9 @@ class AutoDetectGameDirectory(LoggingOperator):
 
         stan = context.scene.stan_tools_settings
         reg_dir = auto_set_regulation_bin_dir(stan, settings)
+        from .remembered_folders import remember_folders
+
+        remember_folders(context)
         if reg_dir:
             self.info(f"Set regulation-bin: {reg_dir}")
 
