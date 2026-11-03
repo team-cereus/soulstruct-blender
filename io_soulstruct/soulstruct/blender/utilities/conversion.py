@@ -4,6 +4,8 @@ __all__ = [
     "to_blender",
     "game_vector_array_to_bl_vector_array",
     "game_trs_to_bl_matrix",
+    "game_trs_to_bl_trs",
+    "bl_trs_to_game_trs",
     "to_game",
     "bl_vector_array_to_game_vector_array",
     "bl_matrix_to_game_trs",
@@ -12,7 +14,6 @@ __all__ = [
 ]
 
 import math
-import typing as tp
 from dataclasses import dataclass
 from functools import singledispatch
 
@@ -51,10 +52,8 @@ FS_BL_CoB_4 = BLMatrix((
 # Game -> Blender
 # =========================
 
-BLENDER_TO_GAME_TYPES = tp.Union[BLEuler, BLVector, BLMatrix, BLQuaternion]
-
 @singledispatch
-def to_game(obj: BLENDER_TO_GAME_TYPES) -> tp.Union[Vector3, Matrix3, Matrix4, EulerRad, FSQuaternion]:
+def to_game(obj):
     """Default: raise for unsupported types."""
     raise TypeError(f"to_game() has no registered converter for type {type(obj)!r}")
 
@@ -95,8 +94,7 @@ def _(e: BLEuler) -> EulerRad:
 
 @to_game.register(BLQuaternion)
 def _(q: BLQuaternion):
-    """Move `w` to end, negate all, and swap Y and Z (== sandwiching with FS_BL_CoB_3 with 3x3 round trip)."""
-    # TODO: Not 100% certain this is equivalent to the matrix round trip.
+    """Move W to end, negate XYZ, and swap Y and Z (== sandwiching with FS_BL_CoB_3 with 3x3 round trip)."""
     return FSQuaternion((-q.x, -q.z, -q.y, q.w))
 
 def bl_vector_array_to_game_vector_array(bl_array: np.ndarray) -> np.ndarray:
@@ -119,11 +117,12 @@ def bl_matrix_to_game_trs(matrix: BLMatrix) -> TRSTransform:
 # Blender -> Game  (inverse)
 # =========================
 
-GAME_TO_BLENDER_TYPES = tp.Union[Vector3, Matrix3, Matrix4, EulerRad, EulerDeg, FSQuaternion]
-
 @singledispatch
-def to_blender(obj: GAME_TO_BLENDER_TYPES) -> tp.Union[BLVector, BLMatrix, BLEuler, BLQuaternion]:
-    """Default: raise for unsupported types."""
+def to_blender(obj):
+    """Default: raise for unsupported types.
+
+    NOTE: We do not support `tuple` because it could be a vector *or* Euler angles, which are converted differently.
+    """
     raise TypeError(f"to_blender() has no registered converter for type {type(obj)!r}")
 
 @to_blender.register(Vector3)
@@ -170,8 +169,7 @@ def _(e: EulerRad) -> BLEuler:
 
 @to_blender.register(FSQuaternion)
 def _(q: FSQuaternion):
-    """Move `w` to end, negate all, and swap Y and Z (== sandwiching with FS_BL_CoB_3 with 3x3 round trip)."""
-    # TODO: Not 100% certain this is equivalent to the matrix round trip.
+    """Move W to start, negate XYZ, and swap Y and Z (== sandwiching with FS_BL_CoB_3 with 3x3 round trip)."""
     return BLQuaternion((q.w, -q.x, -q.z, -q.y))
 
 def game_vector_array_to_bl_vector_array(game_array: np.ndarray) -> np.ndarray:
@@ -188,6 +186,32 @@ def game_trs_to_bl_matrix(transform: TRSTransform) -> BLMatrix:
     bl_rotate = to_blender(transform.rotation)  # quaternion
     bl_scale = to_blender(transform.scale)
     return BLMatrix.LocRotScale(bl_translate, bl_rotate, bl_scale)
+
+
+def game_trs_to_bl_trs(transform: TRSTransform) -> tuple[BLVector, BLQuaternion, BLVector]:
+    """Convert a game `TRSTransform` to a Blender `(translation, rotation, scale)` triple WITHOUT going through a
+    4x4 matrix.
+
+    The FromSoft -> Blender change of basis is a conjugation by the Y/Z swap, which maps translation, rotation and
+    scale independently (rotation stays a proper rotation; scale is just permuted). Converting component-wise
+    therefore loses nothing, whereas `game_trs_to_bl_matrix(...).decompose()` would re-factor any NEGATIVE scale:
+    Blender's `decompose()` canonicalizes a negative-determinant matrix by negating all three scale components and
+    rotating 180 degrees, so `scale=(-1, 1, 1)` comes back as `(1, -1, -1)` with a flipped rotation. That is the same
+    linear map, but not the same `hkQsTransform` -- and Havok composes/blends TRS components, not matrices.
+
+    The rotation is normalized, since quaternions decompressed from spline animations are not always exactly unit.
+    """
+    return (
+        to_blender(transform.translation),
+        to_blender(transform.rotation).normalized(),
+        to_blender(transform.scale),
+    )
+
+
+def bl_trs_to_game_trs(translation: BLVector, rotation: BLQuaternion, scale: BLVector) -> TRSTransform:
+    """Inverse of `game_trs_to_bl_trs()`: convert a Blender `(translation, rotation, scale)` triple to a game
+    `TRSTransform` component-wise, preserving scale signs exactly (see `game_trs_to_bl_trs()`)."""
+    return TRSTransform(to_game(translation), to_game(rotation.normalized()), to_game(scale))
 
 
 @dataclass(slots=True)

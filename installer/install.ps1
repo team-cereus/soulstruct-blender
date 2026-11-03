@@ -8,7 +8,7 @@
       1. Installs Git (via winget) if it is missing.
       2. Clones this repo + its two library submodules into %LOCALAPPDATA%\StanTools\soulstruct-blender
          (or fast-forwards an existing clone).
-      3. Links `io_soulstruct` + `io_soulstruct_lib` into every Blender (4.5+) add-ons folder it finds
+      3. Links `io_soulstruct` + `io_soulstruct_lib` into every Blender (5.1+) add-ons folder it finds
          (directory junctions, so a `git pull` updates Blender too).
       4. Drops a small startup script into each Blender that pulls published updates and enables the
          add-on on first launch (see installer/stan_tools_updater.py).
@@ -26,7 +26,7 @@ $RepoUrl = "https://github.com/team-cereus/soulstruct-blender.git"
 $Branch = if ($env:STAN_TOOLS_BRANCH) { $env:STAN_TOOLS_BRANCH } else { "main" }
 $InstallDir = if ($env:STAN_TOOLS_DIR) { $env:STAN_TOOLS_DIR } else { Join-Path $env:LOCALAPPDATA "StanTools\soulstruct-blender" }
 $Uninstall = [bool]$env:STAN_TOOLS_UNINSTALL
-$MinBlender = [version]"4.5"
+$MinBlender = [version]"5.1"
 $AddonFolders = @("io_soulstruct", "io_soulstruct_lib")
 $StartupStubName = "stan_tools_updater_stub.py"
 

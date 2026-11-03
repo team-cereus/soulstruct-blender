@@ -12,15 +12,16 @@ import bpy
 
 from soulstruct.containers import BinderEntry
 
-from soulstruct.blender.animation.import_operators import ImportHKXAnimationWithBinderChoice
-from soulstruct.blender.animation.utilities import (
+from ..animation.import_operators import ImportHKXAnimationWithBinderChoice
+from ..animation.utilities import (
     import_character_hkx_animation_entry,
     load_character_anibnd_bundle,
 )
-from soulstruct.blender.utilities import LoggingOperator
+from ..base.operators import LoggingOperator
 
 from .animation_labels import label_for_animation_entry, load_tae_labels_for_binder
 from .character_context import resolve_stan_character_context
+from ..base.register import io_soulstruct_operator
 
 _HKX_ENTRY_RE = re.compile(r"^a.*\.hkx(\.dcx)?$", re.IGNORECASE)
 
@@ -59,6 +60,7 @@ def build_character_animation_search_items(
     return items
 
 
+@io_soulstruct_operator
 class StanSearchCharacterAnimation(LoggingOperator):
     """Import one HKX clip from the active character's ANIBND via search popup."""
 

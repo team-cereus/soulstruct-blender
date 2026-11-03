@@ -7,7 +7,7 @@ import math
 import bpy
 from mathutils import Matrix
 
-from soulstruct.blender.flver.models.types.bl_flver_dummy import BlenderFLVERDummy
+from ..flver.models.types.bl_flver_dummy import BlenderFLVERDummy
 
 from .debug_log import stan_debug, stan_info, stan_warning
 from .equip_weapon_param import WeaponRow, get_weapon_row

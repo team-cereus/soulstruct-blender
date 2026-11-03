@@ -32,9 +32,9 @@ import bpy
 
 
 
-from soulstruct.blender.general.properties import SoulstructSettings
+from ..general.properties import SoulstructSettings
 
-from soulstruct.blender.utilities import LoggingOperator
+from ..base.operators import LoggingOperator
 
 
 
@@ -63,6 +63,7 @@ from .poi_markers import (
 )
 
 from .regulation_bin import auto_set_regulation_bin_dir, resolve_regulation_bin_dir
+from ..base.register import io_soulstruct_operator
 
 
 
@@ -106,6 +107,7 @@ def _catalog_poll(context) -> bool:
 
 
 
+@io_soulstruct_operator
 class StanRefreshMapSeedList(LoggingOperator):
 
     """Rebuild map seed enum from LotResultPlayAreaParam."""
@@ -154,6 +156,7 @@ class StanRefreshMapSeedList(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanImportPoiMarkers(LoggingOperator):
 
     """Import Nightreign POI markers as Empty objects."""
@@ -390,6 +393,7 @@ class StanImportPoiMarkers(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanClearPoiMarkers(LoggingOperator):
 
     """Remove all Nightreign POI marker collections and objects."""
@@ -428,6 +432,7 @@ class StanClearPoiMarkers(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanFramePoiMarkers(LoggingOperator):
 
     """Frame the 3D viewport on Nightreign POI markers."""
@@ -464,6 +469,7 @@ class StanFramePoiMarkers(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanImportSelectedPoiMapTile(LoggingOperator):
 
     """Import map tile FLVER geometry at the active POI marker."""
@@ -525,6 +531,7 @@ class StanImportSelectedPoiMapTile(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanPoiCatalogPrev(LoggingOperator):
 
     """Show the previous POI catalog tile."""
@@ -563,6 +570,7 @@ class StanPoiCatalogPrev(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanPoiCatalogNext(LoggingOperator):
 
     """Show the next POI catalog tile."""
@@ -601,6 +609,7 @@ class StanPoiCatalogNext(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanPoiCatalogFrame(LoggingOperator):
 
     """Re-frame the current POI catalog tile."""
@@ -637,6 +646,7 @@ class StanPoiCatalogFrame(LoggingOperator):
 
 
 
+@io_soulstruct_operator
 class StanPoiCatalogBrowseModal(bpy.types.Operator):
 
     """Browse POI catalog tiles with arrow keys."""

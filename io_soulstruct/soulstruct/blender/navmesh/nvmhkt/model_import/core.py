@@ -10,8 +10,9 @@ import bpy
 
 from soulstruct.havok.fromsoft.eldenring import NavmeshHKX
 
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ....base.operators import LoggingOperator
+from ....types import *
+from ....utilities import *
 
 
 @dataclass(slots=True)

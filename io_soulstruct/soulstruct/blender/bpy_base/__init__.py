@@ -1,7 +1,2 @@
-__all__ = [
-    "SoulstructPanel",
-    "SoulstructPropertyGroup",
-]
-
-from .panel import SoulstructPanel
+from .panel import SoulstructPanel, smart_prop
 from .property_group import SoulstructPropertyGroup

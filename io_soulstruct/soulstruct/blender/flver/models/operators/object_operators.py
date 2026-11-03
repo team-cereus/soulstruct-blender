@@ -3,20 +3,27 @@ from __future__ import annotations
 
 __all__ = [
     "CopyToNewFLVER",
+    "CutToNewFLVER",
     "RenameFLVER",
     "SelectMeshChildren",
     "SyncMSBPartArmatures",
     "ClearFLVERSubmeshProperties",
     "AddFLVERSubmeshProperties",
+    "FLVERMaterialSlotAdd",
+    "FLVERMaterialSlotRemove",
+    "FLVERMaterialSlotMove",
 ]
 
 import bpy
 
-from soulstruct.blender.flver.models.types import BlenderFLVER
-from soulstruct.blender.types import SoulstructType
-from soulstruct.blender.utilities import LoggingOperator, replace_shared_prefix
+from ....base.operators import LoggingOperator
+from ....base.register import io_soulstruct_operator
+from ....types import SoulstructType
+from ....utilities import replace_shared_prefix
+from ..types import BlenderFLVER
 
 
+@io_soulstruct_operator
 class CopyToNewFLVER(LoggingOperator):
 
     bl_idname = "object.copy_to_new_flver"
@@ -28,6 +35,12 @@ class CopyToNewFLVER(LoggingOperator):
         name="New Model Name",
         description="Name of the new FLVER model. If empty, will just add '_Copy' suffix to the original name",
         default="",
+    )
+
+    duplicate_materials: bpy.props.BoolProperty(
+        name="Duplicate Materials",
+        description="Duplicate materials of selected faces",
+        default=False,
     )
 
     @classmethod
@@ -44,9 +57,10 @@ class CopyToNewFLVER(LoggingOperator):
             return self.error("Must select a Mesh in Edit Mode.")
 
         bl_flver = BlenderFLVER.from_armature_or_mesh(context.active_object)
-        new_bl_flver = bl_flver.duplicate_edit_mode(
+        new_bl_flver = bl_flver.to_new_bl_flver_edit_mode(
             context=context,
-            make_materials_single_user=True,
+            duplicate_selected_geometry=True,
+            make_materials_single_user=self.duplicate_materials,
             copy_pose=True,  # copy pose immediately (not batched)
         )
         new_bl_flver.deep_rename(self.new_name or f"{bl_flver.name}_Copy")
@@ -54,6 +68,52 @@ class CopyToNewFLVER(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
+class CutToNewFLVER(LoggingOperator):
+
+    bl_idname = "object.cut_to_new_flver"
+    bl_label = "Cut to New FLVER"
+    bl_description = ("Cut selected vertices, edges, and/or faces, their materials, and all FLVER bones and custom "
+                      "properties to a new FLVER model in the active collection. Must be in Edit Mode")
+
+    new_name: bpy.props.StringProperty(
+        name="New Model Name",
+        description="Name of the new FLVER model. If empty, will just add '_Copy' suffix to the original name",
+        default="",
+    )
+
+    duplicate_materials: bpy.props.BoolProperty(
+        name="Duplicate Materials",
+        description="Duplicate materials of selected faces",
+        default=False,
+    )
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        if context.mode != "EDIT_MESH" or not context.active_object or context.active_object.type != "MESH":
+            return False
+        return BlenderFLVER.is_obj_type(context.active_object)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        if not self.poll(context):
+            return self.error("Must select a Mesh in Edit Mode.")
+
+        bl_flver = BlenderFLVER.from_armature_or_mesh(context.active_object)
+        new_bl_flver = bl_flver.to_new_bl_flver_edit_mode(
+            context=context,
+            duplicate_selected_geometry=False,
+            make_materials_single_user=self.duplicate_materials,
+            copy_pose=True,  # copy pose immediately (not batched)
+        )
+        new_bl_flver.deep_rename(self.new_name or f"{bl_flver.name}_Copy")
+
+        return {"FINISHED"}
+
+
+@io_soulstruct_operator
 class RenameFLVER(LoggingOperator):
 
     bl_idname = "object.rename_flver"
@@ -123,6 +183,7 @@ class RenameFLVER(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SelectMeshChildren(LoggingOperator):
     """Simple operator that iterates over selected objects, selects all MESH children of any ARMATURES, and deselects
     anything else that isn't a MESH."""
@@ -150,6 +211,7 @@ class SelectMeshChildren(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SyncMSBPartArmatures(LoggingOperator):
     """Sync the Armature of all FLVER models that are instanced by MSB Parts. Only works for MSB Map Piece ('m*') parts
     currently."""
@@ -183,6 +245,7 @@ class SyncMSBPartArmatures(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ClearFLVERSubmeshProperties(LoggingOperator):
     """Clear all submesh properties on the active FLVER model, so that it will use global properties instead."""
     bl_idname = "flver.clear_submesh_props"
@@ -202,11 +265,11 @@ class ClearFLVERSubmeshProperties(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class AddFLVERSubmeshProperties(LoggingOperator):
-    """Add per-submesh properties on the active FLVER model, to use instead of global properties."""
     bl_idname = "flver.add_submesh_props"
-    bl_label = "Add Submesh Properties"
-    bl_description = "Add per-submesh properties on the active FLVER model, to use instead of global properties"
+    bl_label = "Add Per-Slot Submesh Properties"
+    bl_description = "Add per-material-slot submesh properties to the active FLVER object (replaces global settings)"
 
     @classmethod
     def poll(cls, context) -> bool:
@@ -216,18 +279,119 @@ class AddFLVERSubmeshProperties(LoggingOperator):
 
     def execute(self, context):
         bl_flver = BlenderFLVER.from_armature_or_mesh(context.active_object)
-        for material_slot in bl_flver.obj.material_slots:
-            material = material_slot.material
-            if not material:
-                continue  # empty slot, skip
-            submesh_props = bl_flver.type_properties.submesh_props.add()
-            submesh_props.material = material
-            submesh_props.is_dynamic = bl_flver.type_properties.global_is_dynamic
-            submesh_props.default_bone_index = bl_flver.type_properties.global_default_bone_index
-            submesh_props.face_set_count = bl_flver.type_properties.global_face_set_count
-            submesh_props.use_backface_culling = "MATERIAL"  # default
+        flver_props = bl_flver.type_properties
+        flver_props.submesh_props.clear()
+        for _slot in bl_flver.obj.material_slots:
+            entry = flver_props.submesh_props.add()
+            entry.is_dynamic = flver_props.global_is_dynamic
+            entry.default_bone_index = flver_props.global_default_bone_index
+            entry.face_set_count = flver_props.global_face_set_count
+            entry.use_backface_culling = "MATERIAL"
         self.info(
-            f"Added per-submesh properties for {len(bl_flver.type_properties.submesh_props)} materials on "
-            f"FLVER model '{bl_flver.name}'."
+            f"Added {len(flver_props.submesh_props)} per-slot submesh properties on FLVER '{bl_flver.name}'."
         )
+        return {"FINISHED"}
+
+
+@io_soulstruct_operator
+class FLVERMaterialSlotAdd(LoggingOperator):
+    """Add a material slot to the active FLVER object and append a matching submesh props entry."""
+    bl_idname = "flver.material_slot_add"
+    bl_label = "Add Material Slot"
+    bl_description = "Add a material slot and a matching submesh properties entry to the active FLVER object"
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return (
+            context.mode == "OBJECT"
+            and context.active_object is not None
+            and context.active_object.type == "MESH"
+            and BlenderFLVER.is_obj_type(context.active_object)
+        )
+
+    def execute(self, context):
+        obj = context.active_object
+        bpy.ops.object.material_slot_add()  # adds slot at end, makes it active
+
+        props = obj.FLVER
+        if props.submesh_props:  # only sync if using per-slot mode
+            entry = props.submesh_props.add()
+            entry.is_dynamic = props.global_is_dynamic
+            entry.default_bone_index = props.global_default_bone_index
+            entry.face_set_count = props.global_face_set_count
+            entry.use_backface_culling = "MATERIAL"
+
+        return {"FINISHED"}
+
+
+@io_soulstruct_operator
+class FLVERMaterialSlotRemove(LoggingOperator):
+    """Remove the active material slot from the active FLVER object and remove the matching submesh props entry."""
+    bl_idname = "flver.material_slot_remove"
+    bl_label = "Remove Material Slot"
+    bl_description = "Remove the active material slot and its matching submesh properties entry from the active FLVER object"
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return (
+            context.mode == "OBJECT"
+            and context.active_object is not None
+            and context.active_object.type == "MESH"
+            and BlenderFLVER.is_obj_type(context.active_object)
+            and len(context.active_object.material_slots) > 0
+        )
+
+    def execute(self, context):
+        obj = context.active_object
+        active_index = obj.active_material_index
+
+        props = obj.FLVER
+        if props.submesh_props and 0 <= active_index < len(props.submesh_props):
+            props.submesh_props.remove(active_index)
+
+        bpy.ops.object.material_slot_remove()  # removes active slot
+
+        return {"FINISHED"}
+
+
+@io_soulstruct_operator
+class FLVERMaterialSlotMove(LoggingOperator):
+    """Move the active material slot up or down and keep submesh props in sync."""
+    bl_idname = "flver.material_slot_move"
+    bl_label = "Move Material Slot"
+    bl_description = "Move the active material slot up or down, keeping submesh properties in sync"
+
+    direction: bpy.props.EnumProperty(
+        name="Direction",
+        items=[
+            ("UP", "Up", "Move slot up"),
+            ("DOWN", "Down", "Move slot down"),
+        ],
+        default="UP",
+    )
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return (
+            context.mode == "OBJECT"
+            and context.active_object is not None
+            and context.active_object.type == "MESH"
+            and BlenderFLVER.is_obj_type(context.active_object)
+            and len(context.active_object.material_slots) >= 2
+        )
+
+    def execute(self, context):
+        obj = context.active_object
+        active_index = obj.active_material_index
+        n = len(obj.material_slots)
+
+        props = obj.FLVER
+        if props.submesh_props:
+            if self.direction == "UP" and active_index > 0:
+                props.submesh_props.move(active_index, active_index - 1)
+            elif self.direction == "DOWN" and active_index < n - 1:
+                props.submesh_props.move(active_index, active_index + 1)
+
+        bpy.ops.object.material_slot_move(direction=self.direction)
+
         return {"FINISHED"}

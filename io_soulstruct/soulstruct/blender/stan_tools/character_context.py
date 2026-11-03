@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import bpy
 
-from soulstruct.blender.animation.utilities import get_active_flver_or_part_armature
+from ..animation.utilities import get_active_flver_or_part_armature
 
 from .npc_param import find_character_armature
 

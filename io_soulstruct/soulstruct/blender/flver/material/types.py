@@ -10,16 +10,16 @@ from pathlib import Path
 import bpy
 
 from soulstruct.flver import *
-from soulstruct.games import DARK_SOULS_DSR, DEMONS_SOULS, DARK_SOULS_PTDE
+from soulstruct.games import *
 
-from soulstruct.blender.base import add_auto_type_props
-from soulstruct.blender.exceptions import MaterialImportError, FLVERExportError
-from soulstruct.blender.flver.image import DDSTexture, DDSTextureCollection
-from soulstruct.blender.flver.image.utilities import find_or_create_image
-from soulstruct.blender.types import MeshObject
-from soulstruct.blender.utilities import LoggingOperator, get_bl_custom_prop, remove_dupe_suffix
+from ...base.operators import LoggingOperator
+from ...base.soulstruct_object import add_auto_type_props
+from ...exceptions import MaterialImportError, FLVERExportError, UnsupportedGameError
+from ...flver.image import DDSTexture, DDSTextureCollection
+from ...flver.image.utilities import find_or_create_image
+from ...types import MeshObject
+from ...utilities import get_bl_custom_prop, remove_dupe_suffix
 from . import shaders
-from .shaders.enums import ShaderNodeType
 
 if tp.TYPE_CHECKING:
     from soulstruct.base.models.shaders import MatDef
@@ -100,7 +100,7 @@ class BlenderFLVERMaterial:
 
     @classmethod
     def from_all_mesh_materials(cls, mesh: MeshObject) -> list[tp.Self]:
-        return [cls(mat) for mat in mesh.data.materials]
+        return [cls(mat) for mat in mesh.data.materials if mat is not None]
 
     @classmethod
     def new_from_flver_material(
@@ -115,7 +115,7 @@ class BlenderFLVERMaterial:
         vertex_color_count: int,
         blend_mode="HASHED",
         warn_missing_textures=True,
-        bl_materials_by_matdef_name: dict[str, bpy.types.Material] = None,
+        bl_materials_by_matdef_name: dict[str, bpy.types.Material] | None = None,
     ) -> BlenderFLVERMaterial:
         """Create a new Blender material from a FLVER material.
 
@@ -134,9 +134,11 @@ class BlenderFLVERMaterial:
         MATDEF name, and only the textures updated. This is more efficient than creating identical shader node trees
         over and over for multiple materials.
         """
-        if bl_materials_by_matdef_name is not None and flver_material.mat_def_name in bl_materials_by_matdef_name:
+        mat_def_path = Path(flver_material.mat_def_path)
+
+        if bl_materials_by_matdef_name is not None and mat_def_path.name in bl_materials_by_matdef_name:
             copied = True
-            bl_material = bl_materials_by_matdef_name[flver_material.mat_def_name].copy()
+            bl_material = bl_materials_by_matdef_name[mat_def_path.name].copy()
             bl_material.name = material_name
             # `use_nodes` already set up, and blend settings will match same MatDef.
         else:
@@ -153,11 +155,10 @@ class BlenderFLVERMaterial:
 
         material = cls(bl_material)
 
-        material.mat_def_path = flver_material.mat_def_path  # str
-        if isinstance(flver_material, Material):
-            material.flags = flver_material.flags  # int
-            material.f2_unk_x18 = flver_material.f2_unk_x18  # int
-            material.gx_items = flver_material.get_non_terminator_gx_items()  # final dummy `GXItem` not held in Blender
+        material.mat_def_path = str(mat_def_path)  # str
+        material.flags = flver_material.flags  # int
+        material.f2_unk_x18 = flver_material.f2_unk_x18  # int
+        material.gx_items = _get_non_terminator_gx_items(flver_material)  # final dummy `GXItem` not held in Blender
 
         # Mesh properties:
         material.use_backface_culling = mesh.use_backface_culling  # wraps `face_set[0].use_backface_culling`
@@ -166,6 +167,7 @@ class BlenderFLVERMaterial:
         # NOTE: This index is sometimes invalid for vanilla map FLVERs (e.g., 1 when there is only one bone).
 
         if not matdef:
+            operator.warning(f"No MatDef for {mat_def_path.name}. Storing sampler paths in custom props.")
             # Store FLVER sampler texture paths directly in custom properties. No shader tree will be built, but
             # at least we can faithfully write FLVER texture paths back to files on export.
             for sampler_name, texture_stem in flver_sampler_texture_stems.items():
@@ -206,18 +208,17 @@ class BlenderFLVERMaterial:
             # Override texture path.
             sampler_texture_stems[sampler_name] = texture_stem.lower()
 
+        # Assign shader name from MatDef.
+        material.type_properties.shader_name = matdef.shader_stem
+
+        builder_class = cls.get_builder_class(context)
+        if builder_class is None:
+            raise UnsupportedGameError(
+                f"No material builder class found for this game. Cannot build material {bl_material.name}."
+            )
+
         if not copied:
             # Try to build shader nodetree.
-            if context.scene.soulstruct_settings.is_game(DEMONS_SOULS):
-                builder_class = shaders.demonssouls.NodeTreeBuilder
-            elif context.scene.soulstruct_settings.is_game(DARK_SOULS_PTDE):
-                builder_class = shaders.darksouls1ptde.NodeTreeBuilder
-            elif context.scene.soulstruct_settings.is_game(DARK_SOULS_DSR):
-                builder_class = shaders.darksouls1r.NodeTreeBuilder
-            else:
-                # No special shaders.
-                builder_class = shaders.BaseNodeTreeBuilder
-
             try:
                 builder = builder_class(
                     operator=operator,
@@ -228,17 +229,24 @@ class BlenderFLVERMaterial:
                     vertex_color_count=vertex_color_count,
                 )
                 builder.build()
-            except (MaterialImportError, KeyError, ValueError, IndexError) as ex:
+            except (MaterialImportError, KeyError, ValueError, IndexError, AttributeError) as ex:
+                import traceback
+                traceback.print_exc()
                 operator.warning(
                     f"Error building shader for material '{material_name}'. Textures written to custom properties. "
                     f"Error:\n  {ex}"
                 )
                 for sampler_name, texture_stem in flver_sampler_texture_stems.items():
-                    bl_material[f"Path[{sampler_name}]"] = texture_stem
+                    try:
+                        bl_material[f"Path[{sampler_name}]"] = texture_stem
+                    except KeyError:
+                        # Name is too long. Probably an ER texture. Truncate up to '_snp_Texture2D_':
+                        truncated_name = sampler_name.split("_snp_Texture2D_")[-1]
+                        bl_material[f"Path[{truncated_name}]"] = texture_stem
 
             if bl_materials_by_matdef_name is not None:
                 # Record material for MatDef for future copying.
-                bl_materials_by_matdef_name[flver_material.mat_def_name] = bl_material
+                bl_materials_by_matdef_name[mat_def_path.name] = bl_material
         else:
             # Just replace appropriate texture nodes.
             tex_nodes_by_name = {
@@ -257,9 +265,11 @@ class BlenderFLVERMaterial:
 
                     # Update Image colorspace from node label. (If image is used with multiple sampler types, this will
                     # be the last one found.) TODO: Would be better to do this upon `Image` creation, based on name.
-                    if ("Albedo" not in tex_nodes_by_name[sampler_name].label and
-                            "Lightmap" not in tex_nodes_by_name[sampler_name].label):
-                        bl_image.colorspace_settings.name = "Non-Color"
+                    node_label = tex_nodes_by_name[sampler_name].label
+                    if "Albedo" not in node_label and "Diffuse" not in node_label and "Lightmap" not in node_label:
+                        bl_image.colorspace_settings.name = "Non-Color"  # always
+                    else:
+                        bl_image.colorspace_settings.name = builder_class.ALBEDO_COLOR_SPACE  # game-dependent
 
         return material
 
@@ -268,7 +278,7 @@ class BlenderFLVERMaterial:
         operator: LoggingOperator,
         context: bpy.types.Context,
         matdef: MatDef,
-        texture_collection: DDSTextureCollection = None,
+        texture_collection: DDSTextureCollection | None = None,
         get_texture_path_prefix: tp.Callable[[str], str] | None = None,
     ) -> Material:
         """Create a FLVER material from Blender material custom properties and texture nodes.
@@ -426,34 +436,35 @@ class BlenderFLVERMaterial:
         operator: LoggingOperator,
         context: bpy.types.Context,
         matdef: MatDef,
-        use_map_piece_layout: bool,
-        mesh_kwargs: dict[str, int | bool | None],
-        texture_collection: DDSTextureCollection = None,
+        texture_collection: DDSTextureCollection | None = None,
         get_texture_path_prefix: tp.Callable[[str], str] | None = None,
+        **split_mesh_def_kwargs,
     ) -> SplitMeshDef:
         """Use given `matdef` to create a `SplitMeshDef` for the given Blender material with either a character
         layout or a map piece layout, depending on `use_map_piece_layout`.
 
-        TODO: Remove `use_map_piece_layout` manual switch and generate smarter vertex array layouts.
+        NOTE: All SplitMeshDef kwargs should be in `split_mesh_def_kwargs` (except `uv_layer_names`, which is
+        automatically determined from the MatDef). `is_dynamic` is the only one explicitly required.
         """
+
+        if "is_dynamic" not in split_mesh_def_kwargs:
+            raise ValueError("`is_dynamic` must be given in `split_mesh_def_kwargs` for `to_split_mesh_def()`.")
 
         # Some Blender materials may be variants representing distinct Mesh/FaceSet properties; these will be
         # mapped to the same FLVER `Material`/`VertexArrayLayout` combo (created here).
         flver_material = self.to_flver_material(operator, context, matdef, texture_collection, get_texture_path_prefix)
-        if use_map_piece_layout:
-            array_layout = matdef.get_map_piece_layout()
-        else:
-            array_layout = matdef.get_non_map_piece_layout(mesh_kwargs["is_dynamic"])
+        array_layout = matdef.get_vertex_array_layout(is_dynamic=split_mesh_def_kwargs["is_dynamic"])
 
         used_uv_layer_names = [layer.name for layer in matdef.get_used_uv_layers()]
-        operator.debug(f"Created FLVER material '{flver_material.name}' with UV layers: {used_uv_layer_names}")
+        operator.debug(
+            f"Created FLVER SplitMeshDef with material '{flver_material.name}' and UV layers: {used_uv_layer_names}"
+        )
 
         return SplitMeshDef(
             flver_material,
             array_layout,
-            is_dynamic=mesh_kwargs["is_dynamic"],
-            kwargs=mesh_kwargs,
             uv_layer_names=used_uv_layer_names,
+            **split_mesh_def_kwargs,
         )
 
     def rebuild_node_tree(
@@ -520,19 +531,18 @@ class BlenderFLVERMaterial:
         # Clear existing node tree entirely (keeping the material and its properties).
         bl_material.node_tree.nodes.clear()
 
+        # Assign shader name from MatDef.
+        self.type_properties.shader_name = matdef.shader_stem
+
         # Re-add Material Output node (builders expect it).
         output_node = bl_material.node_tree.nodes.new("ShaderNodeOutputMaterial")
         output_node.name = "Material Output"
 
-        # Select appropriate builder class for the game.
-        if context.scene.soulstruct_settings.is_game(DEMONS_SOULS):
-            builder_class = shaders.demonssouls.NodeTreeBuilder
-        elif context.scene.soulstruct_settings.is_game(DARK_SOULS_PTDE):
-            builder_class = shaders.darksouls1ptde.NodeTreeBuilder
-        elif context.scene.soulstruct_settings.is_game(DARK_SOULS_DSR):
-            builder_class = shaders.darksouls1r.NodeTreeBuilder
-        else:
-            builder_class = shaders.BaseNodeTreeBuilder
+        builder_class = self.get_builder_class(context)
+        if builder_class is None:
+            raise UnsupportedGameError(
+                f"No material builder class found for this game. Cannot rebuild material {bl_material.name}."
+            )
 
         try:
             builder = builder_class(
@@ -544,7 +554,9 @@ class BlenderFLVERMaterial:
                 vertex_color_count=vertex_color_count,
             )
             builder.build()
-        except (MaterialImportError, KeyError, ValueError, IndexError) as ex:
+        except (MaterialImportError, KeyError, ValueError, IndexError, AttributeError) as ex:
+            import traceback
+            traceback.print_exc()
             operator.warning(
                 f"Error rebuilding shader for material '{self.name}'. Textures written to custom properties. "
                 f"Error:\n  {ex}"
@@ -592,5 +604,44 @@ class BlenderFLVERMaterial:
 
         return hash(tuple(hashed))
 
+    @property
+    def shader_name(self) -> str:
+        """Get read-only shader name."""
+        return self.type_properties.shader_name
+
+    @staticmethod
+    def get_builder_class(context: bpy.types.Context) -> type[shaders.BaseNodeTreeBuilder] | None:
+        # Select appropriate builder class for the game.
+        settings = context.scene.soulstruct_settings
+        if settings.is_game(GameType.Bloodborne):
+            return shaders.bloodborne.NodeTreeBuilder
+        elif settings.is_game(GameType.DemonsSouls):
+            return shaders.demonssouls.NodeTreeBuilder
+        elif settings.is_game(GameType.DarkSoulsPTDE):
+            return shaders.darksouls1ptde.NodeTreeBuilder
+        elif settings.is_game(GameType.DarkSoulsDSR):
+            return shaders.darksouls1r.NodeTreeBuilder
+        elif settings.is_er_family():
+            return shaders.eldenring.NodeTreeBuilder
+
+        # Unsupported game.
+        return None
+
 
 add_auto_type_props(BlenderFLVERMaterial, *BlenderFLVERMaterial.AUTO_MATERIAL_PROPS)
+
+
+def _get_non_terminator_gx_items(material: Material) -> list[GXItem]:
+    """Return only the non-terminator `GXItem`s in list.
+
+    Raises a `ValueError` if a terminator item appears anywhere except as the last element, but doesn't care if no
+    terminator item exists at all (as one can be created automatically on FLVER export).
+    """
+    non_term_gx_items = []
+    for i, gx_item in enumerate(material.gx_items):
+        if gx_item.is_terminator:
+            if i != len(material.gx_items) - 1:
+                raise ValueError("Terminator `GXItem` found in non-final position in `Material`.")
+            break  # do not append this final terminator item
+        non_term_gx_items.append(gx_item)
+    return non_term_gx_items

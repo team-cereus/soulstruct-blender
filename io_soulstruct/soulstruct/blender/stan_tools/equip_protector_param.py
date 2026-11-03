@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 if TYPE_CHECKING:
-    from soulstruct.blender.general.properties import SoulstructSettings
+    from ..general.properties import SoulstructSettings
 
 _SLOT_PREFIXES = (
     ("headEquip", "HD"),

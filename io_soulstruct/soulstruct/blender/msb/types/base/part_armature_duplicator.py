@@ -9,10 +9,10 @@ import typing as tp
 import bpy
 from mathutils import Matrix
 
-from soulstruct.blender.flver.models.types import BlenderFLVER, FLVERBoneDataType
-from soulstruct.blender.msb.properties import MSBPartArmatureMode
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ....base.operators import *
+from ....flver.models.types import BlenderFLVER, FLVERBoneDataType
+from ....msb.properties import MSBPartArmatureMode
+from ....types import *
 
 if tp.TYPE_CHECKING:
     from .parts import BaseBlenderMSBPart
@@ -36,7 +36,7 @@ class PartArmatureDuplicator:
         context: bpy.types.Context,
         armature_mode: MSBPartArmatureMode,
         bl_part: BaseBlenderMSBPart,
-        model: MeshObject,
+        model: MeshObject | None,
     ) -> bool:
         """Check `armature_mode` (and presence of `model`) and instance model Armature to Part accordingly."""
         if not model:

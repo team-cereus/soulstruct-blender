@@ -9,12 +9,15 @@ __all__ = [
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from soulstruct.blender.exceptions import SoulstructTypeError
-from soulstruct.blender.flver.models.types import BlenderFLVER
-from soulstruct.blender.flver.models.types.enums import FLVERBoneDataType
-from soulstruct.blender.utilities import LoggingOperator
+from ....base.operators import LoggingOperator
+from ....base.register import io_soulstruct_operator
+from ....exceptions import SoulstructTypeError
+from ....types.bpy_types import ArmatureObject, MeshObject
+from ..types import BlenderFLVER
+from ..types.enums import FLVERBoneDataType
 
 
+@io_soulstruct_operator
 class BakeBonePoseToVertices(LoggingOperator):
 
     bl_idname = "mesh.bake_bone_pose_to_vertices"
@@ -93,6 +96,7 @@ class BakeBonePoseToVertices(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ReboneVertices(LoggingOperator):
 
     bl_idname = "mesh.rebone_vertices"
@@ -115,7 +119,7 @@ class ReboneVertices(LoggingOperator):
         if not tool_settings.rebone_target_bone:
             return self.error("No target bone selected for reboning.")
 
-        bpy.ops.object.mode_set(mode="OBJECT")
+        self.to_object_mode(context)
 
         # noinspection PyTypeChecker
         mesh = context.active_object  # type: MeshObject
@@ -188,6 +192,6 @@ class ReboneVertices(LoggingOperator):
             mesh.vertex_groups[group_index].remove(old_group_vertex_indices)
         target_group.add(vertex_indices, 1.0, "REPLACE")
 
-        bpy.ops.object.mode_set(mode="EDIT")
+        self.to_edit_mode(context)
 
         return {"FINISHED"}

@@ -4,7 +4,7 @@ Windows only. Takes about five minutes, and updates install themselves after tha
 
 ## Before you start
 
-- **Blender 4.5 or newer**, from <https://www.blender.org/download/>. Start it once, then close it.
+- **Blender 5.1 or newer**, from <https://www.blender.org/download/>. Start it once, then close it.
 - **Elden Ring or Nightreign** installed through Steam, with the game files unpacked (UXM), so `Game\chr\`
   holds `.chrbnd.dcx` / `.anibnd.dcx` files.
 - Internet access for the install and for Blender's first launch afterwards.

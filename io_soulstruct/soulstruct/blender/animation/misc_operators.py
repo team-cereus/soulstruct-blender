@@ -6,13 +6,14 @@ import typing as tp
 
 import bpy
 
-from soulstruct.blender.utilities.operators import LoggingOperator
-from soulstruct.blender.types import ArmatureObject, MeshObject
-
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..types import ArmatureObject, MeshObject
 from .types import SoulstructAnimation
 from .utilities import get_active_flver_or_part_armature
 
 
+@io_soulstruct_operator
 class ArmatureActionChoiceOperator(LoggingOperator):
     """Operator called dynamically to let the user choose from a list of available animations for a given armature.
 
@@ -82,6 +83,7 @@ def get_armature_action_choices(self, context):
     return ArmatureActionChoiceOperator.ENUM_OPTIONS
 
 
+@io_soulstruct_operator
 class SelectArmatureActionOperator(LoggingOperator):
     # TODO: FLVER and Part actions are not compatible, as they put root motion in different places.
     #
@@ -93,10 +95,13 @@ class SelectArmatureActionOperator(LoggingOperator):
     @classmethod
     def poll(cls, context) -> bool:
         """Animation's rigged armature must be selected (to extract bone names)."""
-        armature_obj, _, _, _ = get_active_flver_or_part_armature(context)
+        armature_obj, _, _, _, _ = get_active_flver_or_part_armature(context)
         return armature_obj is not None
 
     def execute(self, context):
-        armature_obj, mesh_obj, model_name, is_part = get_active_flver_or_part_armature(context)
+        armature_obj, mesh_obj, model_name, _, _ = get_active_flver_or_part_armature(context)
+        if not armature_obj or not mesh_obj:
+            # Should be prevented by poll.
+            return self.error("Active FLVER model must have an Armature and Mesh selected.")
         ArmatureActionChoiceOperator.run(armature_obj, mesh_obj, model_name)
         return {"FINISHED"}

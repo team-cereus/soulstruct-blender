@@ -10,10 +10,13 @@ __all__ = [
 
 import bpy
 
-from soulstruct.blender.navmesh.nvm.properties import NVMFaceIndex
-from soulstruct.blender.bpy_base.property_group import SoulstructPropertyGroup
+from ..base.register import io_soulstruct_properties, io_soulstruct_pointer_property
+from ..bpy_base.property_group import SoulstructPropertyGroup
+from ..navmesh.nvm.properties import NVMFaceIndex
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Object, "MCG")
 class MCGProps(SoulstructPropertyGroup):
 
     # No game-specific properties.
@@ -37,6 +40,8 @@ class MCGProps(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Object, "MCG_NODE")
 class MCGNodeProps(SoulstructPropertyGroup):
 
     # No game-specific properties.
@@ -84,6 +89,8 @@ class MCGNodeProps(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Object, "MCG_EDGE")
 class MCGEdgeProps(SoulstructPropertyGroup):
 
     # No game-specific properties.
@@ -114,6 +121,8 @@ class MCGEdgeProps(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "nav_graph_compute_settings")
 class NavGraphComputeSettings(SoulstructPropertyGroup):
 
     # No game-specific properties.
@@ -133,6 +142,12 @@ class NavGraphComputeSettings(SoulstructPropertyGroup):
         name="Obstacle Cost Multiplier",
         default=1.0,
         description="Cost multiplier (of distance) for Obstacle faces. Ignores obstacle count",
+    )
+    require_clean_mesh: bpy.props.BoolProperty(
+        name="Require Clean Mesh",
+        default=False,
+        description="Prohibit duplicate vertices and/or degenerate faces, i.e. geometry deleted by vertex merging. "
+                    "Must be disabled for some vanilla navmeshes, but you should sanitize them and enable this"
     )
     connected_exit_vertex_distance: bpy.props.FloatProperty(
         name="Connected Exit Vertex Distance",

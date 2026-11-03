@@ -6,10 +6,12 @@ __all__ = [
     "ShowAllDummiesOperator",
 ]
 
-from soulstruct.blender.flver.models.types import BlenderFLVER
-from soulstruct.blender.utilities import LoggingOperator
+from ....base.operators import LoggingOperator
+from ....base.register import io_soulstruct_operator
+from ..types import BlenderFLVER
 
 
+@io_soulstruct_operator
 class HideAllDummiesOperator(LoggingOperator):
     """Simple operator to hide all dummy children of a selected FLVER armature."""
     bl_idname = "object.hide_all_flver_dummies"
@@ -30,6 +32,7 @@ class HideAllDummiesOperator(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ShowAllDummiesOperator(LoggingOperator):
     """Simple operator to show all dummy children of a selected FLVER armature."""
     bl_idname = "object.show_all_flver_dummies"

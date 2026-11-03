@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 __all__ = [
-    "ImportAnyHKXAnimation",
     "ImportHKXAnimationWithBinderChoice",
+    "ImportAnyHKXAnimation",
     "ImportCharacterHKXAnimation",
     "ImportObjectHKXAnimation",
     "ImportAssetHKXAnimation",
@@ -21,10 +21,12 @@ from soulstruct.containers import Binder, BinderEntry, EntryNotFoundError
 from soulstruct.eldenring.containers import DivBinder
 from soulstruct.havok.core import HKX
 
-from soulstruct.blender.exceptions import AnimationImportError, UnsupportedGameError
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
-
+from soulstruct.games import GameType
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..exceptions import AnimationImportError, UnsupportedGameError
+from ..flver import FLVERBoneDataType
+from ..types import *
 from .types import SoulstructAnimation
 from .utilities import *
 from .utilities import import_character_hkx_animation_entry, load_character_anibnd_bundle  # noqa: F401
@@ -34,9 +36,11 @@ c0000_ANIBND_RE = re.compile(r"^c0000_.*\.anibnd(\.dcx)?$")
 OBJBND_RE = re.compile(r"^.*?\.objbnd(\.dcx)?$")
 GEOMBND_RE = re.compile(r"^.*?\.geombnd(\.dcx)?$")
 SKELETON_ENTRY_RE = re.compile(r"skeleton\.hkx(\.dcx)?", flags=re.IGNORECASE)
+# NOTE: Case-insensitive. Demon's Souls ANIBNDs are inconsistent: some (e.g. c1000, c1020) use uppercase `.HKX`.
+ANIMATION_ENTRY_RE = re.compile(r"a.*\.hkx(\.dcx)?", flags=re.IGNORECASE)
 
 
-class BaseImportHKXAnimation(LoggingOperator):
+class _BaseImportHKXAnimation(LoggingOperator):
     """NOTE: Not all subclasses are `ImportHelper` operators."""
 
     @classmethod
@@ -44,7 +48,7 @@ class BaseImportHKXAnimation(LoggingOperator):
         """Must have an active FLVER or Part with an Armature and be working on a game that supports animations."""
         if not context.scene.soulstruct_settings.game_config.supports_animation:
             return False
-        armature_obj, _, _, _ = get_active_flver_or_part_armature(context)
+        armature_obj, _, _, _, _ = get_active_flver_or_part_armature(context)
         return armature_obj is not None
 
     def get_anibnd_skeleton_compendium(
@@ -66,8 +70,6 @@ class BaseImportHKXAnimation(LoggingOperator):
         model_name: str = "",
     ) -> HKX | None:
         """Load compendium HKX (picks div-specific compendium for multi-div ER/NR ANIBNDs)."""
-        from soulstruct.blender.animation.utilities import load_anibnd_compendium
-
         compendium = load_anibnd_compendium(
             binder,
             hkx_entry_path=hkx_entry_path,
@@ -80,7 +82,7 @@ class BaseImportHKXAnimation(LoggingOperator):
         return compendium
 
     @staticmethod
-    def read_skeleton(skeleton_anibnd: Binder, compendium: HKX = None) -> SKELETON_TYPING:
+    def read_skeleton(skeleton_anibnd: Binder, compendium: HKX | None = None) -> SKELETON_TYPING:
         try:
             skeleton_entry = skeleton_anibnd[SKELETON_ENTRY_RE]
         except EntryNotFoundError:
@@ -88,7 +90,8 @@ class BaseImportHKXAnimation(LoggingOperator):
         return read_skeleton_hkx_entry(skeleton_entry, compendium)
 
 
-class ImportHKXAnimationWithBinderChoice(BaseImportHKXAnimation, BinderEntrySelectOperator):
+@io_soulstruct_operator
+class ImportHKXAnimationWithBinderChoice(_BaseImportHKXAnimation, BinderEntrySelectOperator):
     """Presents user with a choice of enums from `enum_choices` class variable (set prior).
 
     See: https://blender.stackexchange.com/questions/6512/how-to-call-invoke-popup
@@ -103,6 +106,7 @@ class ImportHKXAnimationWithBinderChoice(BaseImportHKXAnimation, BinderEntrySele
     MODEL_NAME: tp.ClassVar[str] = ""
     SKELETON_HKX: tp.ClassVar[SKELETON_TYPING | None] = None
     HKX_COMPENDIUM: tp.ClassVar[HKX | None] = None
+    BONE_DATA_TYPE: tp.ClassVar[FLVERBoneDataType | None] = None
 
     @classmethod
     def get_binder(cls, context) -> Binder | None:
@@ -112,7 +116,7 @@ class ImportHKXAnimationWithBinderChoice(BaseImportHKXAnimation, BinderEntrySele
     @classmethod
     def filter_binder_entry(cls, context, entry: BinderEntry) -> bool:
         """Only show HKX animation entries."""
-        return re.match(r"a.*\.hkx(\.dcx)?", entry.name) is not None
+        return ANIMATION_ENTRY_RE.match(entry.name) is not None
 
     def _import_entry(self, context, entry: BinderEntry):
         """Import the chosen HKX animation entry."""
@@ -137,6 +141,7 @@ class ImportHKXAnimationWithBinderChoice(BaseImportHKXAnimation, BinderEntrySele
         model_name: str,
         skeleton_hkx: SKELETON_TYPING,
         compendium: HKX | None,
+        bone_data_type: FLVERBoneDataType,
     ) -> set[str]:
         cls.BINDER = binder
         cls.ARMATURE_OBJ = armature_obj
@@ -144,13 +149,15 @@ class ImportHKXAnimationWithBinderChoice(BaseImportHKXAnimation, BinderEntrySele
         cls.MODEL_NAME = model_name
         cls.SKELETON_HKX = skeleton_hkx
         cls.HKX_COMPENDIUM = compendium
+        cls.BONE_DATA_TYPE = bone_data_type
 
         # Invoke this operator.
         # noinspection PyUnresolvedReferences
         return bpy.ops.wm.hkx_animation_binder_choice("INVOKE_DEFAULT")
 
 
-class ImportAnyHKXAnimation(BaseImportHKXAnimation, LoggingImportOperator):
+@io_soulstruct_operator
+class ImportAnyHKXAnimation(_BaseImportHKXAnimation, LoggingImportOperator):
     bl_idname = "import_scene.hkx_animation"
     bl_label = "Import Any HKX Anim"
     bl_description = ("Import a HKX animation file from an ANIBND, OBJBND, or GEOMBND. Loose HKX animation files "
@@ -170,14 +177,14 @@ class ImportAnyHKXAnimation(BaseImportHKXAnimation, LoggingImportOperator):
 
     def execute(self, context):
 
-        armature_obj, mesh_obj, model_name, is_part = get_active_flver_or_part_armature(context)
+        armature_obj, mesh_obj, model_name, is_part, bone_data_type = get_active_flver_or_part_armature(context)
 
         binder_path = Path(self.filepath)
 
         if OBJBND_RE.match(binder_path.name):
             # Get ANIBND nested inside OBJBND.
             objbnd = DivBinder.from_path(binder_path)
-            anibnd_entry = objbnd.find_entry_matching_name(r".*\.anibnd(\.dcx)?")
+            anibnd_entry = objbnd.find_entry_by_name_regex(r".*\.anibnd(\.dcx)?")
             if not anibnd_entry:
                 return self.error("OBJBND binder does not contain a nested ANIBND binder.")
             skeleton_anibnd = anibnd = DivBinder.from_binder_entry(anibnd_entry)
@@ -185,7 +192,7 @@ class ImportAnyHKXAnimation(BaseImportHKXAnimation, LoggingImportOperator):
         elif GEOMBND_RE.match(binder_path.name):
             geombnd = Binder.from_path(binder_path)  # never `DivBinder`
             # Find ANIBND entry inside GEOMBND. Always uppercase. TODO: Shouldn't be case-sensitive though.
-            anibnd_entry = geombnd.find_entry_matching_name(r".*\.anibnd(\.dcx)?")
+            anibnd_entry = geombnd.find_entry_by_name_regex(r".*\.anibnd(\.dcx)?")
             if not anibnd_entry:
                 return self.error("GEOMBND binder does not contain an ANIBND binder.")
             skeleton_anibnd = anibnd = Binder.from_binder_entry(anibnd_entry)  # never `DivBinder`
@@ -217,7 +224,7 @@ class ImportAnyHKXAnimation(BaseImportHKXAnimation, LoggingImportOperator):
         skeleton_hkx = read_skeleton_hkx_entry(skeleton_entry, compendium)
 
         # Don't bother calling sub-operator if there are no HKX entries to offer.
-        if not anibnd.find_entries_matching_name(r"a.*\.hkx(\.dcx)?"):
+        if not anibnd.find_entries_by_name_regex(ANIMATION_ENTRY_RE):
             return self.error(f"Cannot find any HKX animation files in binder '{binder_path.name}'.")
 
         return ImportHKXAnimationWithBinderChoice.run(
@@ -227,14 +234,15 @@ class ImportAnyHKXAnimation(BaseImportHKXAnimation, LoggingImportOperator):
             model_name=model_name,
             skeleton_hkx=skeleton_hkx,
             compendium=compendium,
+            bone_data_type=bone_data_type,
         )
 
 
-class BaseImportTypedHKXAnimation(BaseImportHKXAnimation):
+class _BaseImportTypedHKXAnimation(_BaseImportHKXAnimation):
     """Base class for importing character, object, and asset FLVER animations from their specific ANIBND sources."""
 
     def execute(self, context):
-        armature_obj, mesh_obj, model_name, is_part = get_active_flver_or_part_armature(context)
+        armature_obj, mesh_obj, model_name, is_part, bone_data_type = get_active_flver_or_part_armature(context)
 
         # Find animation HKX entry/entries.
         try:
@@ -242,7 +250,7 @@ class BaseImportTypedHKXAnimation(BaseImportHKXAnimation):
         except Exception as ex:
             return self.error(str(ex))
 
-        anim_hkx_entries = anibnd.find_entries_matching_name(r"a.*\.hkx(\.dcx)?")
+        anim_hkx_entries = anibnd.find_entries_by_name_regex(ANIMATION_ENTRY_RE)
         if not anim_hkx_entries:
             raise AnimationImportError(
                 f"Cannot find any HKX animation files in '{anibnd.path_name}' for FLVER model '{model_name}'."
@@ -255,6 +263,7 @@ class BaseImportTypedHKXAnimation(BaseImportHKXAnimation):
             model_name=model_name,
             skeleton_hkx=skeleton_hkx,
             compendium=compendium,
+            bone_data_type=bone_data_type,
         )
 
 
@@ -263,7 +272,8 @@ def _sub_c0000_binder_choices(self, context):
     return ImportCharacterHKXAnimation.c0000_binder_choices
 
 
-class ImportCharacterHKXAnimation(BaseImportTypedHKXAnimation):
+@io_soulstruct_operator
+class ImportCharacterHKXAnimation(_BaseImportTypedHKXAnimation):
     """Detects name of selected character FLVER Armature and finds their ANIBND in the game directory."""
     bl_idname = "import_scene.character_hkx_animation"
     bl_label = "Import Character Anim"
@@ -283,10 +293,10 @@ class ImportCharacterHKXAnimation(BaseImportTypedHKXAnimation):
         return super().poll(context) and context.active_object.name[0] == "c"
 
     def invoke(self, context, _event):
-        _, _, model_name, _ = get_active_flver_or_part_armature(context)
+        _, _, model_name, _, _ = get_active_flver_or_part_armature(context)
 
         if model_name == "c0000":
-            self._invoke_c0000(context)
+            return self._invoke_c0000(context)
 
         # No invocation dialogs needed for non-c0000 characters.
         ImportCharacterHKXAnimation.c0000_binder_choices = [("None", "None", "No sub-ANIBND")]
@@ -297,7 +307,7 @@ class ImportCharacterHKXAnimation(BaseImportTypedHKXAnimation):
         # NOTE: The 'c0000_*.txt' registration of sub-ANIBNDs holds for all games I've seen so far.
         settings = self.settings(context)
         try:
-            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game]
+            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game_type]
         except KeyError:
             raise AnimationImportError(f"Game '{settings.game}' is not supported for character animation import.")
         relative_anibnd_path = Path(game_anim_info.relative_binder_path.format(model_name="c0000"))
@@ -309,7 +319,7 @@ class ImportCharacterHKXAnimation(BaseImportTypedHKXAnimation):
         except Exception as ex:
             return self.error(f"Error reading ANIBND '{anibnd_path}': {ex}")
 
-        sub_anibnd_stems = [entry.stem for entry in anibnd.find_entries_matching_name(r"c0000_.*\.txt")]
+        sub_anibnd_stems = [entry.stem for entry in anibnd.find_entries_by_name_regex(r"c0000_.*\.txt")]
         if not sub_anibnd_stems:
             return self.error("Could not find any sub-ANIBND definitions (e.g. 'c0000_a0x.txt') in c0000 ANIBND.")
         # NOTE: We don't check if the sub-ANIBND actually exist yet; they may not yet be in the project directory,
@@ -332,7 +342,8 @@ class ImportCharacterHKXAnimation(BaseImportTypedHKXAnimation):
         return anibnd, skeleton_hkx, compendium
 
 
-class ImportObjectHKXAnimation(BaseImportTypedHKXAnimation):
+@io_soulstruct_operator
+class ImportObjectHKXAnimation(_BaseImportTypedHKXAnimation):
     """Detects name of selected object FLVER Armature and finds their OBJBND in the game directory."""
     bl_idname = "import_scene.object_hkx_animation"
     bl_label = "Import Object Anim"
@@ -349,7 +360,7 @@ class ImportObjectHKXAnimation(BaseImportTypedHKXAnimation):
         settings = self.settings(context)
 
         try:
-            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_OBJ[settings.game]
+            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_OBJ[settings.game_type]
         except KeyError:
             raise UnsupportedGameError(f"Game '{settings.game}' is not supported for object animation import.")
 
@@ -378,7 +389,8 @@ class ImportObjectHKXAnimation(BaseImportTypedHKXAnimation):
         return anibnd, skeleton_hkx, compendium
 
 
-class ImportAssetHKXAnimation(BaseImportTypedHKXAnimation):
+@io_soulstruct_operator
+class ImportAssetHKXAnimation(_BaseImportTypedHKXAnimation):
     """Detects name of selected asset FLVER Armature and finds their GEOMBND in the game directory.
 
     Elden Ring and onwards only.
@@ -405,7 +417,7 @@ class ImportAssetHKXAnimation(BaseImportTypedHKXAnimation):
         # Find ANIBND entry inside GEOMBND. Always uppercase, but we ignore case anyway.
         anibnd_name = f"{model_name.upper()}.anibnd"
         try:
-            anibnd_entry = geombnd.find_entry_matching_name(anibnd_name, flags=re.IGNORECASE)
+            anibnd_entry = geombnd.find_entry_by_name_regex(anibnd_name, flags=re.IGNORECASE)
         except EntryNotFoundError:
             raise AnimationImportError(f"GEOMBND of object '{model_name}' has no ANIBND '{anibnd_name}'.")
         skeleton_anibnd = anibnd = Binder.from_binder_entry(anibnd_entry)

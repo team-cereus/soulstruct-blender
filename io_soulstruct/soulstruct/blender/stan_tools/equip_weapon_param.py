@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 import bpy
 
 if TYPE_CHECKING:
-    from soulstruct.blender.general.properties import SoulstructSettings
+    from ..general.properties import SoulstructSettings
 
-from soulstruct.blender.general.weapon_names import WeaponIndexEntry, get_weapon_index
+from ..general.weapon_names import WeaponIndexEntry, get_weapon_index
 
 
 @dataclass(frozen=True, slots=True)

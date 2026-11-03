@@ -23,13 +23,16 @@ from pathlib import Path
 import bpy
 from mathutils import Vector
 
+from soulstruct.containers import Binder, BinderEntry, EntryNotFoundError
+from soulstruct.games import GameType
 from soulstruct.havok.fromsoft.eldenring.file_types import NavmeshHKX
 
-from soulstruct.blender.exceptions import NVMHKTImportError
-from soulstruct.blender.navmesh.nvmhkt.utilities import get_dungeons_to_overworld_dict
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
-from soulstruct.containers import Binder, BinderEntry, EntryNotFoundError
+from ....base.operators import *
+from ....base.register import io_soulstruct_operator
+from ....exceptions import NVMHKTImportError
+from ....types import *
+from ....utilities import *
+from ..utilities import get_dungeons_to_overworld_dict
 from .core import *
 
 ANY_NVMHKT_NAME_RE = re.compile(r"^(?P<stem>.*)\.hkx$")  # no DCX inside DCX-compressed NVMHKTBNDs
@@ -43,7 +46,7 @@ class NVMHKTImportChoiceInfo(tp.NamedTuple):
     entries: list[BinderEntry]  # entries from which user must choose
 
 
-class BaseImportNVMHKT(LoggingImportOperator):
+class _BaseImportNVMHKT(LoggingImportOperator):
 
     # Type hints for `LoggingOperator`.
     error: tp.Callable[[str], set[str]]
@@ -64,7 +67,7 @@ class BaseImportNVMHKT(LoggingImportOperator):
         Returns a list of `NVMHKTImportInfo` or `NVMHKTImportChoiceInfo` objects, depending on whether the Binder
         contains multiple entries that the user may need to choose from.
         """
-        nvm_entries = binder.find_entries_matching_name(ANY_NVMHKT_NAME_RE)
+        nvm_entries = binder.find_entries_by_name_regex(ANY_NVMHKT_NAME_RE)
         if not nvm_entries:
             raise NVMHKTImportError(f"Cannot find any '.hkx{{.dcx}}' files in binder {file_path}.")
 
@@ -88,7 +91,7 @@ class BaseImportNVMHKT(LoggingImportOperator):
                         self.warning(f"Error occurred while reading NVMHKT Binder entry '{entry.name}': {ex}")
                     else:
                         nvmhkt.path = Path(entry.name)  # also done in `GameFile`, but explicitly needed below
-                        new_import_infos.append((entry.minimal_stem, nvmhkt))
+                        new_import_infos.append((entry.stem, nvmhkt))
                 return new_import_infos
 
             # Queue up all matching Binder entries instead of loaded NVMHKT instances; user will choose entry in pop-up.
@@ -101,7 +104,7 @@ class BaseImportNVMHKT(LoggingImportOperator):
             self.warning(f"Error occurred while reading NVMHKT Binder entry '{nvm_entries[0].name}': {ex}")
             return []
 
-        return [(nvm_entries[0].minimal_stem, nvmhkt)]
+        return [(nvm_entries[0].stem, nvmhkt)]
 
     def check_nvm_entry_model_id(self, nvm_entry: BinderEntry) -> bool:
         """Checks if the given NVMHKT Binder entry matches the given navmesh model ID."""
@@ -112,7 +115,8 @@ class BaseImportNVMHKT(LoggingImportOperator):
         return entry_model_id == self.navmesh_model_id
 
 
-class ImportNVMHKT(BaseImportNVMHKT):
+@io_soulstruct_operator
+class ImportNVMHKT(_BaseImportNVMHKT):
     bl_idname = "import_scene.nvmhkt"
     bl_label = "Import NVMHKT"
     bl_description = "Import a HKX Havok navmesh file. Can import from NVMHKTBNDs and supports DCX-compressed files"
@@ -213,6 +217,7 @@ def get_binder_entry_choices(self, context):
     return ImportNVMHKTWithBinderChoice.enum_options
 
 
+@io_soulstruct_operator
 class ImportNVMHKTWithBinderChoice(LoggingOperator):
     """Presents user with a choice of enums from `enum_choices` class variable (set prior).
 
@@ -246,7 +251,7 @@ class ImportNVMHKTWithBinderChoice(LoggingOperator):
         choice = int(self.choices_enum)
         entry = self.nvmhkt_entries[choice]
 
-        model_name = entry.minimal_stem
+        model_name = entry.stem
         nvmhkt = entry.to_binary_file(NavmeshHKX)
 
         self.importer.operator = self
@@ -279,6 +284,7 @@ class ImportNVMHKTWithBinderChoice(LoggingOperator):
         bpy.ops.wm.nvmhkt_binder_choice_operator("INVOKE_DEFAULT")
 
 
+@io_soulstruct_operator
 class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
     """Import a NVMHKT from the current selected value of listed game map NVMHKTs."""
     bl_idname = "import_scene.nvmhkt_entry"
@@ -295,7 +301,7 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
 
     @classmethod
     def poll(cls, context) -> bool:
-        if not cls.settings(context).is_game("ELDEN_RING"):
+        if not cls.settings(context).is_game(GameType.EldenRing):
             return False
         settings = cls.settings(context)
         try:
@@ -319,7 +325,7 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
 
         settings = self.settings(context)
         map_stem = settings.map_stem
-        model_name = entry.minimal_stem
+        model_name = entry.stem
         nvmhkt = entry.to_binary_file(NavmeshHKX)
 
         collection = find_or_create_collection(
@@ -344,7 +350,7 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
         return {"FINISHED"}
 
 
-class ImportAllNVMHKTBase(LoggingOperator):
+class _BaseImportAllNVMHKT(LoggingOperator):
 
     use_material: bool
 
@@ -360,14 +366,14 @@ class ImportAllNVMHKTBase(LoggingOperator):
         entry_name: str,
     ) -> MeshObject:
         try:
-            hkx_entry = nvmhktbnd.find_entry_name(entry_name)
+            hkx_entry = nvmhktbnd.find_entry_by_name(entry_name)
         except EntryNotFoundError:
             self.warning(
                 f"Could not find NVMHKT entry '{entry_name}' in NVMHKTBND file '{nvmhktbnd.path.name}'."
             )
             raise
 
-        model_name = hkx_entry.minimal_stem
+        model_name = hkx_entry.stem
         nvmhkt = hkx_entry.to_binary_file(NavmeshHKX)
 
         importer = NVMHKTImporter(self, context, collection=collection)
@@ -384,7 +390,8 @@ class ImportAllNVMHKTBase(LoggingOperator):
             raise
 
 
-class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
+@io_soulstruct_operator
+class ImportAllNVMHKTsFromNVMHKTBND(_BaseImportAllNVMHKT):
     """Import all NVMHKTs of chosen resolution(s) from selected map."""
     bl_idname = "import_scene.all_nvmhkt"
     bl_label = "Import All Map NVMHKTs"
@@ -406,7 +413,7 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
 
     @classmethod
     def poll(cls, context) -> bool:
-        if not cls.settings(context).is_game("ELDEN_RING"):
+        if not cls.settings(context).is_game(GameType.EldenRing):
             return False
         settings = cls.settings(context)
         if settings.map_stem in {"", "0"}:
@@ -460,8 +467,8 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
 
         if import_settings.import_hires_navmeshes:
 
-            for entry in nvmhktbnd.find_entries_matching_name(re.compile(r"n.*\.hkx")):
-                model_name = correct_model_name(entry.minimal_stem)
+            for entry in nvmhktbnd.find_entries_by_name_regex(re.compile(r"n.*\.hkx")):
+                model_name = correct_model_name(entry.stem)
                 nvmhkt = entry.to_binary_file(NavmeshHKX)
 
                 self.info(f"Importing NVMHKT model {model_name}.")
@@ -494,8 +501,8 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
                 models.append(bl_nvmhkt)
 
         if import_settings.import_lores_navmeshes:
-            for entry in nvmhktbnd.find_entries_matching_name(re.compile(r"o.*\.hkx")):
-                model_name = correct_model_name(entry.minimal_stem)
+            for entry in nvmhktbnd.find_entries_by_name_regex(re.compile(r"o.*\.hkx")):
+                model_name = correct_model_name(entry.stem)
                 nvmhkt = entry.to_binary_file(NavmeshHKX)
 
                 self.info(f"Importing NVMHKT model {model_name}.")
@@ -588,7 +595,7 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
         return {"FINISHED"}
 
 
-class ImportAllOverworldNVMHKTsBase(ImportAllNVMHKTBase):
+class _BaseImportAllOverworldNVMHKTs(_BaseImportAllNVMHKT):
     """Import all NVMHKTs from ALL base game overworld small tile maps (m60_XX_ZZ_00).
 
     Note that large/medium overworld tiles do not have navmeshes in Elden Ring.
@@ -609,7 +616,7 @@ class ImportAllOverworldNVMHKTsBase(ImportAllNVMHKTBase):
 
     @classmethod
     def poll(cls, context) -> bool:
-        if not cls.settings(context).is_game("ELDEN_RING"):
+        if not cls.settings(context).is_game(GameType.EldenRing):
             return False
         return True
 
@@ -711,7 +718,8 @@ class ImportAllOverworldNVMHKTsBase(ImportAllNVMHKTBase):
         return {"FINISHED"}
 
 
-class ImportAllOverworldNVMHKTs(ImportAllOverworldNVMHKTsBase):
+@io_soulstruct_operator
+class ImportAllOverworldNVMHKTs(_BaseImportAllOverworldNVMHKTs):
     """Import all NVMHKTs from ALL base game overworld small tile maps (m60_XX_ZZ_00).
 
     Note that large/medium overworld tiles do not have navmeshes in Elden Ring.
@@ -723,7 +731,8 @@ class ImportAllOverworldNVMHKTs(ImportAllOverworldNVMHKTsBase):
     AREA = "m60"
 
 
-class ImportAllDLCOverworldNVMHKTs(ImportAllOverworldNVMHKTsBase):
+@io_soulstruct_operator
+class ImportAllDLCOverworldNVMHKTs(_BaseImportAllOverworldNVMHKTs):
     """Import all NVMHKTs from ALL DLC overworld small tile maps (m61_XX_ZZ_00).
 
     Note that large/medium overworld tiles do not have navmeshes in Elden Ring.

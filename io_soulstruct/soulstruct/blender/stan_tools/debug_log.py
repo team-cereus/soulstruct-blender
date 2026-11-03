@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from soulstruct.blender.utilities import LoggingOperator
+    from ..base.operators import LoggingOperator
 
 __all__ = [
     "STAN_TOOLS_LOGGER",

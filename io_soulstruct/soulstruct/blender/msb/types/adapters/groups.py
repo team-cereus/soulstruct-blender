@@ -11,22 +11,21 @@ import bpy
 
 from soulstruct.base.maps.msb.utils import BitSet
 
-from soulstruct.blender.types.field_adapters import FieldAdapter
-
-BIT_SET_T = tp.TypeVar("BIT_SET_T", bound=BitSet)
+from ....types.field_adapters import FieldAdapter
 
 if tp.TYPE_CHECKING:
     from ..base.parts import BaseBlenderMSBPart
 
 
 @dataclass(slots=True, frozen=True)
-class MSBPartGroupsAdapter(FieldAdapter, tp.Generic[BIT_SET_T]):
+class MSBPartGroupsAdapter[BIT_SET_T: BitSet](FieldAdapter):
     """Adapter for any `MSBPart` field using a `BitSet` (e.g. draw/display/navmesh groups).
 
     Only 128-bit and 256-bit `BitSet` types are supported. (1024-bit is only used for `collision_mask` in Elden Ring.)
     """
 
-    bit_set_type: type[BIT_SET_T] = None
+    # NOTE: Cannot use a generic parameter in a `tp.ClassVar`.
+    bit_set_type: type[BIT_SET_T]
 
     def __post_init__(self):
         super(MSBPartGroupsAdapter, self).__post_init__()
@@ -41,7 +40,7 @@ class MSBPartGroupsAdapter(FieldAdapter, tp.Generic[BIT_SET_T]):
         groups = set()
         for i, bit_vector_32 in enumerate(bit_vector_32s):
             for j in range(32):
-                if bit_vector_32[i]:
+                if bit_vector_32[j]:
                     groups.add(i * 32 + j)
         return self.bit_set_type(groups)
 

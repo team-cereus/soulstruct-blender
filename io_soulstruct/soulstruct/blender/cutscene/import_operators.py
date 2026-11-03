@@ -1,11 +1,16 @@
-"""VERY early/experimental system for importing/exporting DSR cutscene animations into Blender."""
+"""Import DSR cutscene animations (RemoBND) into Blender.
+
+The MSB Parts animated by the cutscene must already be imported (with their FLVER models) into the appropriate
+`{map} MSB` collections; the importer looks them up by game name and animates their Armatures (duplicating the model
+Armature to the Part if needed). All cuts are concatenated into ONE shared Action, whose `cutscene` properties
+record the cut boundaries for export.
+"""
 from __future__ import annotations
 
 __all__ = [
     "ImportHKXCutscene",
 ]
 
-import math
 import re
 import traceback
 import typing as tp
@@ -13,37 +18,32 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.base.animations.sibcam import CameraFrameTransform
-
+from soulstruct.games import GameType
 from soulstruct.havok.fromsoft.darksouls1r.remobnd import *
 
-from soulstruct.blender.animation.types import SoulstructAnimation
-from soulstruct.blender.exceptions import CutsceneImportError, SoulstructTypeError
-from soulstruct.blender.msb.properties.parts import MSBPartArmatureMode
-from soulstruct.blender.msb.types.adapters import get_part_game_name
-from soulstruct.blender.msb.types.darksouls1r import *
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ..base.operators import LoggingImportOperator
+from ..base.register import io_soulstruct_operator
+from ..exceptions import CutsceneImportError
+from ..msb.properties.parts import MSBPartArmatureMode
+from ..types import *
+from ..utilities import *
+from .types import CutFrames, SoulstructCutsceneAnimation
+from .utilities import BL_PART_CLASSES, find_remo_part_msb_part, get_clip_fov_values
 
 if tp.TYPE_CHECKING:
-    from soulstruct.blender.msb.types.base.parts import BaseBlenderMSBPart
+    from ..msb.types.base.parts import BaseBlenderMSBPart
 
 REMOBND_RE = re.compile(r"^.*?\.remobnd(\.dcx)?$")
 
 
-BL_PART_CLASSES = {
-    RemoPartType.Player: BlenderMSBPlayerStart,
-    RemoPartType.Character: BlenderMSBCharacter,
-    RemoPartType.Object: BlenderMSBObject,
-    RemoPartType.MapPiece: BlenderMSBMapPiece,
-    RemoPartType.Collision: BlenderMSBCollision,
-}
-
-
+@io_soulstruct_operator
 class ImportHKXCutscene(LoggingImportOperator):
     bl_idname = "import_scene.hkx_cutscene"
     bl_label = "Import HKX Cutscene"
     bl_description = "Import a HKX cutscene file from a RemoBND"
+
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
+    directory: bpy.props.StringProperty(options={'HIDDEN'}, subtype="DIR_PATH")
 
     filter_glob: bpy.props.StringProperty(
         default="*.remobnd;*.remobnd.dcx",
@@ -58,63 +58,68 @@ class ImportHKXCutscene(LoggingImportOperator):
     )
 
     DEFAULT_SUBDIR = "remo"
+    POLL_DEFAULT_SUBDIR = False
 
     @classmethod
     def poll(cls, context) -> bool:
         """Only for DSR right now."""
-        return cls.settings(context).is_game("DARK_SOULS_DSR") and super().poll(context)
+        return cls.settings(context).is_game(GameType.DarkSoulsDSR) and super().poll(context)
 
-    def execute(self, context):
+    def _execute(self, context):
         remobnd_path = Path(self.filepath)
         import_settings = context.scene.cutscene_import_settings
 
         if not REMOBND_RE.match(remobnd_path.name):
             raise CutsceneImportError("Must import cutscene from a `remobnd` binder file.")
-        
+
         try:
             remobnd = RemoBND.from_path(remobnd_path)
         except Exception as ex:
             raise CutsceneImportError(f"Could not parse RemoBND file '{remobnd_path}': {ex}")
 
+        cutscene_animation = SoulstructCutsceneAnimation.new(remobnd.cutscene_name)
+        bl_frames_per_game_frame = 2.0 if import_settings.to_60_fps else 1.0
+
+        # Record cut layout on the Action so export can split the concatenated timeline back into cuts.
+        props = cutscene_animation.props
+        props.cutscene_name = remobnd.cutscene_name
+        props.source_remobnd_path = str(remobnd_path)
+        props.bl_frames_per_game_frame = bl_frames_per_game_frame
+        props.set_cuts([(cut.name, cut.sibcam.clip_frame_count) for cut in remobnd.cuts])
+
+        # Create the camera FIRST. If camera import fails we only need to drop the Action,
+        # leaving no dangling cutscene collections behind.
         try:
-            camera = self.create_camera(context, remobnd, import_settings.to_60_fps)
+            camera = self.create_camera(remobnd, cutscene_animation, bl_frames_per_game_frame)
         except Exception as ex:
+            bpy.data.actions.remove(cutscene_animation.action)
             traceback.print_exc()  # for inspection in Blender console
             return self.error(f"Cannot import HKX cutscene camera data from {remobnd_path.name}. Error: {ex}")
 
-        if import_settings.camera_data_only:
-            self.info("Imported HKX cutscene camera data only.")
-            return {"FINISHED"}
-
-        # We don't load MSBs and attach them to the RemoBND. We look up the imported Parts in Blender directly.
-        remobnd.load_remo_parts()
-
-        self.info(f"Importing HKX cutscene: {remobnd.cutscene_name}")
-
+        # Camera succeeded: now build collections and link it.
         map_cutscene_collection = find_or_create_collection(
             context.scene.collection, f"{remobnd.get_msb_stem()} Cutscenes"
         )
         cutscene_collection = bpy.data.collections.new(f"Cutscene {remobnd.cutscene_name}")
         map_cutscene_collection.children.link(cutscene_collection)
-
         cutscene_collection.objects.link(camera)
-        all_animations = [SoulstructAnimation(camera.animation_data.action)]
+
+        if import_settings.camera_data_only:
+            cutscene_animation.set_scene_frame_range(context, reset_current_frame=True)
+            self.info("Imported HKX cutscene camera data only.")
+            return {"FINISHED"}
+
+        # We don't load MSBs and attach them to the RemoBND. We look up the imported Parts in Blender directly.
+        remobnd.load_remo_parts()
+        self.info(f"Importing HKX cutscene: {remobnd.cutscene_name}")
 
         for remo_part_type, remo_parts_dict in remobnd.all_remo_parts.items():
-            
+
             if remo_part_type == RemoPartType.Dummy:
-                for remo_part in remo_parts_dict.values():
-                    if remo_part_type == RemoPartType.Dummy:
-                        # Create an Empty and animate its transform.
-                        dummy_anim = self.create_cutscene_dummy(
-                            context,
-                            remobnd,
-                            remo_part,
-                            cutscene_collection,
-                        )
-                        if dummy_anim:
-                            all_animations.append(dummy_anim)
-                continue  # next `RemoPartType`
+                self._import_dummies(
+                    remobnd, remo_parts_dict, cutscene_collection, cutscene_animation, bl_frames_per_game_frame
+                )
+                continue
 
             try:
                 bl_part_class = BL_PART_CLASSES[remo_part_type]
@@ -126,320 +131,196 @@ class ImportHKXCutscene(LoggingImportOperator):
             bl_part_class: type[BaseBlenderMSBPart]
 
             for remo_part in remo_parts_dict.values():
+                self._import_part(
+                    context,
+                    remobnd,
+                    remo_part,
+                    remo_part_type,
+                    bl_part_class,
+                    cutscene_collection,
+                    cutscene_animation,
+                    bl_frames_per_game_frame,
+                )
 
-                self.debug(f"Adding RemoPart: {remo_part.name}")
-
-                bl_part = self.find_remo_part_msb_part(context, remo_part, bl_part_class)
-                if bl_part is None:
-                    continue  # next RemoPart
-
-                # Link to cutscene collection (additively; still in MSB collection).
-                cutscene_collection.objects.link(bl_part.obj)
-
-                if bl_part._MODEL_ADAPTER.bl_model_type != SoulstructType.FLVER:
-                    # e.g. Collisions. Not animated, only used for display groups.
-                    continue  # next RemoPart
-
-                all_cut_frames = self._get_remo_part_cut_arma_frames_or_counts(remobnd, remo_part)
-
-                # TODO: `RemoPart` method that checks if animation data, for a given cut:
-                #   a) is root only (no bones)
-                #   b) is 100% identity transform
-                #  If both are true, we can skip animating this part.
-                #  If (a) is true, we can animate the object's transform only.
-                #  We can maybe just assert that Map Pieces are NEVER animated, as well.
-
-                # We need to add an Armature to the Part, if it doesn't already have one (including default Armatures).
-                # TODO: Do we actually need the Map Pieces to have default Armatures...?
-                #  Surely they don't have any actual animation data in the REMOBND.
-                #  (Correct: just root motion, which doesn't require an Armature. Animation drives transform only.)
-                if not bl_part.armature:
-                    # TODO: try/except, etc.
-                    bl_part.duplicate_flver_model_armature(
-                        self,
-                        context,
-                        mode=MSBPartArmatureMode.IF_PRESENT,
-                        copy_pose=False,
-                    )
-                    context.view_layer.update()  # so we can set pose below  TODO: slight optimization to batch this
-
-                if not bl_part.armature:
-                    if remo_part_type != RemoPartType.MapPiece:
-                        self.warning(f"MSB Part '{remo_part.map_part_name}' does not have an Armature. Cannot animate.")
-                    continue  # next RemoPart
-
-                if bl_part.armature.name not in cutscene_collection.objects:
-                    cutscene_collection.objects.link(bl_part.armature)
-
-                # Get bone names from first cut that includes this part.
-                first_cut_frames = next(iter(remo_part.cut_arma_frames.values()))
-                animated_bone_names = list(first_cut_frames[0].bone_transforms.keys())
-
-                bl_bone_names = [b.name for b in bl_part.armature.data.bones]
-                # Check that all cutscene part bone names are present in Blender Armature.
-                # We ignore the FLVER 'master' bone, which does not appear in cutscene data (it's replaced by the
-                # root of the amalgamated cutscene 'skeleton').
-                flver_bones_missing = False
-                for bone_name in animated_bone_names:
-                    if bone_name not in bl_bone_names:
-                        self.error(
-                            f"Cutscene bone name '{bone_name}' is missing from part armature '{bl_part.name}'. "
-                            f"Cannot apply cutscene animation."
-                        )
-                        flver_bones_missing = True
-                        break
-                if flver_bones_missing:
-                    continue
-
-                # Create action for this part.
-                # TODO: When scaling up frame rate, CONSTANT interpolation on final frame leaves the NEXT frame fixed
-                #  before the next cut. Just a tiny visual quirk that wouldn't affect export.
-                try:
-                    part_anim = SoulstructAnimation.new_from_cutscene_cuts(
-                        context,
-                        action_name=f"{remobnd.cutscene_name}[{bl_part.game_name}]",
-                        armature_or_dummy=bl_part.armature,
-                        arma_cuts=all_cut_frames,
-                    )
-                except Exception as ex:
-                    traceback.print_exc()  # for inspection in Blender console
-                    self.error(
-                        f"Cannot create cutscene animation for '{bl_part.name}' from cutscene {remobnd_path.name}. "
-                        f"Error: {ex}"
-                    )
-                    continue  # next RemoPart
-
-                all_animations.append(part_anim)
-
-        if all_animations:
-            frame_start = min(anim.action.frame_range[0] for anim in all_animations)
-            frame_end = max(anim.action.frame_range[1] for anim in all_animations)
-            context.scene.frame_start = int(frame_start)
-            context.scene.frame_end = int(frame_end)
-            context.scene.frame_set(context.scene.frame_start)
-            self.info(f"Set cutscene start/end frames to: {frame_start}, {frame_end}")
+        cutscene_animation.set_scene_frame_range(context, reset_current_frame=True)
+        frame_start, frame_end = cutscene_animation.action.frame_range
+        self.info(f"Set cutscene start/end frames to: {frame_start}, {frame_end}")
 
         return {"FINISHED"}
 
-    @staticmethod
-    def _get_remo_part_cut_arma_frames_or_counts(
-        remobnd: RemoBND, remo_part: RemoPart
-    ) -> list[list[RemoPartAnimationFrame] | int]:
-        """For each cut, get the Armature-space frames for the given `remo_part` or a frame count if not in cut.
+    # region Per-part import
 
-        Each frame maps bone names to a `TRSTransform` in armature space. Cuts are just lists of frames.
-        Separate cuts are maintained so that we can disable interpolation between them as keyframes are added.
-        For cuts that don't contain this part, we include the length of the cut (from the camera) instead so
-        that the appropriate number of frames can be skipped when creating the Action.
-        """
-        all_cut_frames = []  # type: list[list[RemoPartAnimationFrame] | int]
-        for cut in remobnd.cuts:
-            if cut.name in remo_part.cut_arma_frames:
-                # Model is present in this cut. Use real transforms.
-                all_cut_frames.append(remo_part.cut_arma_frames[cut.name])
-            else:
-                # Model is absent in this cut. Just include clip frame count for padding the timeline.
-                all_cut_frames.append(cut.sibcam.clip_frame_count)
-        return all_cut_frames
-
-    def find_remo_part_msb_part(
-        self, context: bpy.types.Context, remo_part: RemoPart, bl_part_class: type[BaseBlenderMSBPart]
-    ) -> BaseBlenderMSBPart | None:
-
-        area, block = remo_part.map_area_block
-        map_stem = f"m{area:02d}_{block:02d}_00_00"
-        msb_stem = context.scene.soulstruct_settings.get_latest_map_stem_version(map_stem)
-        collection_name = f"{msb_stem} {bl_part_class.MSB_ENTRY_SUBTYPE.get_nice_name()} Parts"
-        try:
-            # TODO: Restrict to Scene collections?
-            part_collection = bpy.data.collections[collection_name]
-        except KeyError:
-            self.error(
-                f"Could not find MSB Part collection '{collection_name}' for cutscene Part "
-                f"'{remo_part.map_part_name}' (full Remo name '{remo_part.name}')."
-            )
-            return None
-
-        for obj in part_collection.objects:  # immediate child objects only
-            # TODO: Use proper 'find object of type' utility.
-            if obj.type == "MESH" and get_part_game_name(obj.name) == remo_part.map_part_name:
-                try:
-                    return bl_part_class(obj)
-                except SoulstructTypeError:
-                    self.error(
-                        f"Found Mesh object '{obj.name}' in collection '{part_collection.name}', but it "
-                        f"is not a valid `{bl_part_class.__name__}` object."
-                    )
-                    return None
-
-        self.error(f"Could not find MSB Part '{remo_part.map_part_name}' in MSB collection '{part_collection.name}'.")
-        return None
-
-    def create_cutscene_dummy(
+    def _import_part(
         self,
         context: bpy.types.Context,
         remobnd: RemoBND,
         remo_part: RemoPart,
+        remo_part_type: RemoPartType,
+        bl_part_class: type[BaseBlenderMSBPart],
         cutscene_collection: bpy.types.Collection,
-    ) -> SoulstructAnimation | None:
-        dummy_obj = new_empty_object(f"{remobnd.cutscene_name} {remo_part.name}")
-        cutscene_collection.objects.link(dummy_obj)
-        all_cut_frames = self._get_remo_part_cut_arma_frames_or_counts(remobnd, remo_part)
+        cutscene_animation: SoulstructCutsceneAnimation,
+        bl_frames_per_game_frame: float,
+    ) -> None:
+        """Import and animate a single (non-Dummy) RemoPart."""
+        self.debug(f"Adding RemoPart: {remo_part.name}")
+
+        bl_part = find_remo_part_msb_part(self, context, remo_part, bl_part_class)
+        if bl_part is None:
+            return
+
+        # Link to cutscene collection (additively; still in MSB collection).
+        cutscene_collection.objects.link(bl_part.obj)
+
+        if bl_part.bl_model_type != SoulstructType.FLVER:
+            # e.g. Collisions. Not animated, only used for display groups.
+            return
+        if not bl_part.model:
+            # No model set. Cannot detect bone data type.
+            return
+
+        bone_data_type = bl_part.model.FLVER.bone_data_type
+
+        cuts = self._get_remo_part_cuts(remobnd, remo_part)
+
+        # We need to add an Armature to the Part, if it doesn't already have one (including default Armatures).
+        # Map Pieces are never bone-animated (root motion only), which doesn't require an Armature.
+        if not bl_part.armature:
+            # TODO: try/except around duplication so a single failure doesn't abort the whole import.
+            bl_part.duplicate_flver_model_armature(
+                self,
+                context,
+                mode=MSBPartArmatureMode.IF_PRESENT,
+                copy_pose=False,
+            )
+            context.view_layer.update()  # so we can set pose below
+
+        if not bl_part.armature:
+            if remo_part_type != RemoPartType.MapPiece:
+                self.warning(f"MSB Part '{remo_part.map_part_name}' does not have an Armature. Cannot animate.")
+            return
+
+        # noinspection PyTypeChecker
+        armature = bl_part.armature  # type: ArmatureObject
+        if armature.name not in cutscene_collection.objects:
+            cutscene_collection.objects.link(armature)
+
+        if not self._validate_part_bones(remo_part, bl_part, armature):
+            return
 
         try:
-            return SoulstructAnimation.new_from_cutscene_cuts(
-                context,
-                action_name=f"{remobnd.cutscene_name}[{remo_part.name}]",
-                armature_or_dummy=dummy_obj,
-                arma_cuts=all_cut_frames,
-                is_root_motion_only=True,
+            cutscene_animation.add_armature_cuts(
+                armature=armature,
+                cuts=cuts,
+                bl_frames_per_game_frame=bl_frames_per_game_frame,
+                bone_data_type=bone_data_type,
+                is_root_motion_only=False,
+                assert_root_bone_names=remo_part.part_cutscene_root_bone_names,
             )
         except Exception as ex:
-            traceback.print_exc()  # for inspection in Blender console
-            self.error(
-                f"Cannot create cutscene animation for Dummy '{remo_part.name}' "
-                f"from cutscene at path '{remobnd.path.name}'. Error: {ex}"
+            self._log_exception(
+                f"Cannot create cutscene animation for '{bl_part.name}' from cutscene "
+                f"{remobnd.path.name}. Error: {ex}"
             )
-            return None
+
+    def _validate_part_bones(
+        self, remo_part: RemoPart, bl_part: BaseBlenderMSBPart, armature: ArmatureObject
+    ) -> bool:
+        """Check that every cutscene-animated bone for this part exists in the Blender Armature.
+
+        Bone names are unioned across the first frame of every cut the part appears in, in case a
+        part uses different bone sets in different cuts. The FLVER 'master' bone is intentionally
+        not required: it's replaced by the root of the amalgamated cutscene skeleton and never
+        appears in cutscene data.
+        """
+        animated_bone_names = set()
+        for cut_frames in remo_part.cut_arma_frames.values():
+            if cut_frames:
+                animated_bone_names.update(cut_frames[0].bone_transforms.keys())
+
+        bl_bone_names = {b.name for b in armature.data.bones}
+        missing = animated_bone_names - bl_bone_names
+        if missing:
+            self.error(
+                f"Cutscene bone name(s) {sorted(missing)} missing from part armature "
+                f"'{bl_part.name}'. Cannot apply cutscene animation."
+            )
+            return False
+        return True
+
+    def _import_dummies(
+        self,
+        remobnd: RemoBND,
+        remo_parts_dict: dict[tp.Any, RemoPart],
+        cutscene_collection: bpy.types.Collection,
+        cutscene_animation: SoulstructCutsceneAnimation,
+        bl_frames_per_game_frame: float,
+    ) -> None:
+        """Create an Empty for each Dummy RemoPart and animate its transform (root motion only)."""
+        for remo_part in remo_parts_dict.values():
+            dummy_obj = new_empty_object(f"{remobnd.cutscene_name} {remo_part.name}")
+            cutscene_collection.objects.link(dummy_obj)
+            cuts = self._get_remo_part_cuts(remobnd, remo_part)
+
+            try:
+                cutscene_animation.add_dummy_cuts(
+                    dummy=dummy_obj,
+                    cuts=cuts,
+                    bl_frames_per_game_frame=bl_frames_per_game_frame,
+                )
+            except Exception as ex:
+                self._log_exception(
+                    f"Cannot create cutscene animation for Dummy '{remo_part.name}' "
+                    f"from cutscene at path '{remobnd.path.name}'. Error: {ex}"
+                )
+
+    # endregion
+
+    @staticmethod
+    def _get_remo_part_cuts(remobnd: RemoBND, remo_part: RemoPart) -> list[CutFrames]:
+        """Build the per-cut animation list for `remo_part`.
+
+        Each `CutFrames` carries the cut's clip length and, when the part is present in that cut,
+        its Armature-space frames (bone names -> `TRSTransform`). Cuts are kept separate so that
+        interpolation can be disabled across cut boundaries when keyframes are added. For cuts the
+        part is absent from, `frames` is `None` and `frame_count` (from the camera clip) pads the
+        timeline so a later reappearance lands on the right frame.
+        """
+        cuts = []  # type: list[CutFrames]
+        for cut in remobnd.cuts:
+            frames = remo_part.cut_arma_frames.get(cut.name)
+            frame_count = len(frames) if frames is not None else cut.sibcam.clip_frame_count
+            cuts.append(CutFrames(frame_count=frame_count, frames=frames))
+        return cuts
+
+    def _log_exception(self, message: str) -> None:
+        """Print the current traceback (for the Blender console) and report an operator error."""
+        traceback.print_exc()
+        self.error(message)
 
     def create_camera(
         self,
-        context: bpy.types.Context,
         remobnd: RemoBND,
-        to_60_fps: bool,
+        cutscene_animation: SoulstructCutsceneAnimation,
+        bl_frames_per_game_frame: float,
     ) -> CameraObject:
-        """Create a new Blender camera object for the cutscene."""
+        """Create a new Blender camera object for the cutscene and animate it."""
         camera_name = self.camera_name.format(CutsceneName=remobnd.cutscene_name)
-        camera_data = bpy.data.cameras.new(self.camera_name.format(CutsceneName=remobnd.cutscene_name))
+        camera_data = bpy.data.cameras.new(camera_name)
         camera_data.sensor_width = 35  # mm (seems to match game FoV appearance)
         # noinspection PyTypeChecker
         camera = bpy.data.objects.new(camera_name, camera_data)  # type: CameraObject
 
-        # Add motion to camera.
+        # Add motion to camera. FoV is evaluated from each cut's sparse Hermite keyframes at every clipped frame.
         camera_transforms = [cut.sibcam.get_clipped_camera_animation() for cut in remobnd.cuts]
-        camera_fov_keyframes = [cut.sibcam.get_fov_keyframes_scaled_to_clip() for cut in remobnd.cuts]
-
-        self.create_camera_actions(
-            camera,
-            cutscene_name=remobnd.cutscene_name,
-            camera_transforms=camera_transforms,
-            camera_fov_keyframes=camera_fov_keyframes,
-            to_60_fps=to_60_fps,
-        )
-
-        return camera
-
-    def create_camera_actions(
-        self,
-        camera: CameraObject,
-        cutscene_name: str,
-        camera_transforms: list[list[CameraFrameTransform]],
-        camera_fov_keyframes: list[list[tuple[float, float]]],
-        to_60_fps: bool,
-    ) -> tuple[bpy.types.Action, bpy.types.Action]:
-        """Creates and returns two new actions
-            - action on Camera object for location and rotation animation
-            - action on Camera data for focal length animation
-        """
-        camera_data = camera.data
-
-        obj_action_name = f"{cutscene_name}[Camera]"
-        obj_action = None
-        data_action_name = f"{cutscene_name}[CameraData]"
-        data_action = None
-
-        original_location = camera.location.copy()
-        original_rotation = camera.rotation_euler.copy()
-        original_focal_length = camera_data.lens
+        camera_fov_values = [get_clip_fov_values(cut.sibcam) for cut in remobnd.cuts]
 
         try:
-            camera.animation_data_create()
-            camera.animation_data.action = obj_action = bpy.data.actions.new(name=obj_action_name)
-            camera_data.animation_data_create()
-            camera_data.animation_data.action = data_action = bpy.data.actions.new(name=data_action_name)
-            self.add_camera_keyframes(camera, camera_transforms, camera_fov_keyframes, to_60_fps)
+            cutscene_animation.add_camera_cuts(
+                camera, camera_transforms, camera_fov_values, bl_frames_per_game_frame
+            )
         except Exception:
-            if obj_action:
-                bpy.data.actions.remove(obj_action)
-            if data_action:
-                bpy.data.actions.remove(data_action)
-            # Reset camera to original state. (NOTE: Redundant since camera is always created by cutscene!)
-            camera.location = original_location
-            camera.rotation_euler = original_rotation
-            camera_data.lens = original_focal_length
+            bpy.data.objects.remove(camera)
+            bpy.data.cameras.remove(camera_data)
             raise
 
-        # Ensure actions are not deleted when not in use.
-        obj_action.use_fake_user = True
-        data_action.use_fake_user = True
-        # Update all F-curves (they do NOT cycle).
-        for fcurve in obj_action.fcurves:
-            fcurve.update()
-        for fcurve in data_action.fcurves:
-            fcurve.update()
-
-        return obj_action, data_action
-
-    @staticmethod
-    def add_camera_keyframes(
-        camera: CameraObject,
-        camera_transforms: list[list[CameraFrameTransform]],
-        camera_fov_keyframes: list[list[tuple[float, float]]],
-        to_60_fps: bool,
-    ):
-        """Add keyframes for camera object and data (focal length)."""
-        camera_data = camera.data  # type: bpy.types.Camera
-
-        final_frame_indices = set()
-
-        # TODO: Fix any camera rotation discontinuities first?
-
-        # NOT reset across cuts.
-        cutscene_frame_index = 0
-
-        # TODO: Use array `foreach_set`, not `keyframe_insert`.
-
-        for cut_camera_transforms in camera_transforms:
-
-            for cut_frame_index, camera_transform in enumerate(cut_camera_transforms):
-                bl_frame_index = cutscene_frame_index * 2 if to_60_fps else cutscene_frame_index
-                bl_translate = to_blender(camera_transform.position)
-                bl_euler = to_blender(camera_transform.rotation)
-                camera.location = bl_translate
-                camera.rotation_euler = bl_euler
-                camera.keyframe_insert(data_path="location", frame=bl_frame_index)
-                camera.keyframe_insert(data_path="rotation_euler", frame=bl_frame_index)
-                if cut_frame_index == len(cut_camera_transforms) - 1:
-                    final_frame_indices.add(bl_frame_index)
-                cutscene_frame_index += 1
-
-        for fcurve in camera.animation_data.action.fcurves:
-            for keyframe in fcurve.keyframe_points:
-                if int(keyframe.co.x) in final_frame_indices:
-                    keyframe.interpolation = "CONSTANT"
-                else:
-                    keyframe.interpolation = "LINEAR"
-
-        cut_fov_t_offset = 0
-        camera_final_t = set()
-        sensor_width = camera_data.sensor_width
-        for cut_fov_keyframes, cut_camera_transforms in zip(camera_fov_keyframes, camera_transforms, strict=True):
-
-            bl_t = -1
-            for t, fov in cut_fov_keyframes:
-                camera_data.lens = sensor_width / (2 * math.tan(fov / 2.0))
-                bl_t = (cut_fov_t_offset + t) * 2 if to_60_fps else (cut_fov_t_offset + t)
-                camera_data.keyframe_insert(data_path="lens", frame=bl_t)
-            if bl_t >= 0:
-                camera_final_t.add(bl_t)
-
-            # Add transform frame count to `t` offset for next cut.
-            cut_fov_t_offset += len(cut_camera_transforms)
-
-        # Make all keyframes in `final_frame_indices` 'CONSTANT' interpolation.
-        for fcurve in camera_data.animation_data.action.fcurves:
-            for keyframe in fcurve.keyframe_points:
-                if int(keyframe.co.x) in camera_final_t:
-                    keyframe.interpolation = "CONSTANT"
-                else:
-                    keyframe.interpolation = "LINEAR"
+        return camera

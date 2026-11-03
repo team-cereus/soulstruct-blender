@@ -6,7 +6,12 @@ __all__ = [
 
 import bpy
 
+from ..base.register import io_soulstruct_properties, io_soulstruct_pointer_property
+from .skeleton import HKX_SKELETON_BONE_SOURCE_ITEMS, HKXSkeletonBoneSource
 
+
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "animation_export_settings")
 class AnimationExportSettings(bpy.types.PropertyGroup):
 
     selected_frames_only: bpy.props.BoolProperty(
@@ -20,5 +25,19 @@ class AnimationExportSettings(bpy.types.PropertyGroup):
         name="Auto-Repack to Mod Folder",
         description="After exporting a character animation, copy the full repacked ANIBND into the Mod Folder's chr\\ "
                     "directory (set in Soulstruct Settings) for ModEngine and DS Anim Studio",
+        default=True,
+    )
+
+    skeleton_bone_source: bpy.props.EnumProperty(
+        name="Skeleton Bone Source",
+        description="Which FLVER Armature bones to write to a newly generated HKX skeleton",
+        items=HKX_SKELETON_BONE_SOURCE_ITEMS,
+        default=HKXSkeletonBoneSource.TEMPLATE,
+    )
+
+    skeleton_include_ancestor_bones: bpy.props.BoolProperty(
+        name="Include Ancestor Bones",
+        description="Also export all ancestors of every sourced bone in a newly generated HKX skeleton. If disabled, "
+                    "each bone is parented to its nearest exported ancestor instead",
         default=True,
     )

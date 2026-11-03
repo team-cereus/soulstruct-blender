@@ -159,21 +159,21 @@ def get_bl_custom_prop(bl_obj, name: str, prop_type: tp.Type, default=None, call
     return prop_value
 
 
-def is_uniform(vector: Vector | Vector3, rel_tol: float):
+def is_uniform(vector: Vector | Vector3, rel_tol: float) -> bool:
     xy_close = math.isclose(vector.x, vector.y, rel_tol=rel_tol)
     xz_close = math.isclose(vector.x, vector.z, rel_tol=rel_tol)
     yz_close = math.isclose(vector.y, vector.z, rel_tol=rel_tol)
     return xy_close and xz_close and yz_close
 
 
-def is_path_and_file(path: str | Path | None) -> bool:
+def is_path_and_file(path: str | Path | None) -> tp.TypeGuard[Path | str]:
     """Return True if `path` is a valid path to a file."""
     if path is None:
         return False
     return Path(path).is_file()
 
 
-def is_path_and_dir(path: str | Path | None) -> bool:
+def is_path_and_dir(path: str | Path | None) -> tp.TypeGuard[Path | str]:
     """Return True if `path` is a valid path to a directory."""
     if path is None:
         return False
@@ -187,7 +187,7 @@ def get_collection_map_stem(obj: bpy.types.Object) -> str:
     """
     if not obj.users_collection:
         raise ValueError(f"Object '{obj.name}' is not in any Blender collection.")
-    map_stem = None
+    map_stem = ""
     for collection in obj.users_collection:
         new_match = MAP_STEM_RE.match(collection.name.split(" ")[0])
         if new_match:

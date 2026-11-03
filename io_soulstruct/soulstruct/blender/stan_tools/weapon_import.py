@@ -11,10 +11,10 @@ import bpy
 from soulstruct.containers import Binder
 from soulstruct.flver import FLVER
 
-from soulstruct.blender.flver.image.image_import_manager import ImageImportManager
-from soulstruct.blender.flver.models.types import BlenderFLVER
-from soulstruct.blender.flver.utilities import get_flvers_from_binder
-from soulstruct.blender.utilities import find_or_create_collection
+from ..flver.image.image_import_manager import ImageImportManager
+from ..flver.models.types import BlenderFLVER
+from ..flver.utilities import get_flvers_from_binder
+from ..utilities import find_or_create_collection
 
 from .debug_log import stan_debug, stan_info, stan_warning
 from .unequip_weapon import tag_weapon_objects

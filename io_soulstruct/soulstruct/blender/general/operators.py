@@ -14,9 +14,11 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.blender.general.game_config import BLENDER_GAME_CONFIG
-from soulstruct.blender.utilities import *
-from soulstruct.games import ELDEN_RING
+from soulstruct.games import GameType
+
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from .game_config import BLENDER_GAME_CONFIG
 
 if tp.TYPE_CHECKING:
     from .game_structure import GameStructure
@@ -94,7 +96,10 @@ class _SelectMapDirectory(LoggingOperator):
         global _DETECTED_MAP_ENUM_ITEMS
 
         def get_map_desc(map_stem: str):
-            return BLENDER_GAME_CONFIG[ELDEN_RING].map_constants.get_map(map_stem).verbose_name
+            try:
+                return BLENDER_GAME_CONFIG[GameType.EldenRing].map_constants.get_map(map_stem).verbose_name
+            except (KeyError, AttributeError, ValueError):
+                return map_stem  # e.g. Nightreign map stems not in Elden Ring constants
 
         if filter_mode.endswith("DUNGEONS"):
             # Dungeons. Possible extra area check.
@@ -145,16 +150,17 @@ class _SelectMapDirectory(LoggingOperator):
         root = self.get_root(context)
         if not root:
             return self.error(f"{self.SOURCE} directory not set.")
-        map_dir = root.get_dir_path("map", if_exist=True)  # type: Path | None
+        map_dir = root.get_dir_path_if_exists("map")
         if not map_dir:
             return self.error(f"{self.SOURCE} 'map' directory not found.")
         if settings.is_er_family():
-            self.set_map_options_eldenring(map_dir, settings.er_map_filter_mode)
+            # Nightreign shares Elden Ring's map layout and filter setting.
+            self.set_map_options_eldenring(map_dir, settings.eldenring.map_filter_mode)
         else:
 
             def get_map_desc(map_stem: str):
                 try:
-                    return BLENDER_GAME_CONFIG[settings.game].map_constants.get_map(map_stem).verbose_name
+                    return BLENDER_GAME_CONFIG[settings.game_type].map_constants.get_map(map_stem).verbose_name
                 except (KeyError, AttributeError, ValueError):
                     return map_stem
 
@@ -169,10 +175,11 @@ class _SelectMapDirectory(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SelectGameMapDirectory(_SelectMapDirectory):
     """Browse for game map directory to set `map_stem` setting."""
     bl_idname = "soulstruct.select_game_map_directory"
-    bl_label = "Select Map from Game"
+    bl_label = "Select Map in Game"
     bl_description = "Select a map subdirectory in game 'map' folder"
 
     SOURCE = "Game"
@@ -184,15 +191,16 @@ class SelectGameMapDirectory(_SelectMapDirectory):
     )
 
     @classmethod
-    def get_root(cls, context) -> GameStructure:
+    def get_root(cls, context) -> GameStructure | None:
         settings = cls.settings(context)
         return settings.game_root
 
 
+@io_soulstruct_operator
 class SelectProjectMapDirectory(_SelectMapDirectory):
     """Browse for project map directory to set `map_stem` setting."""
     bl_idname = "soulstruct.select_project_map_directory"
-    bl_label = "Select Map from Project"
+    bl_label = "Select Map in Project"
     bl_description = "Select a map subdirectory in project 'map' folder"
 
     SOURCE = "Project"
@@ -204,11 +212,12 @@ class SelectProjectMapDirectory(_SelectMapDirectory):
     )
 
     @classmethod
-    def get_root(cls, context) -> GameStructure:
+    def get_root(cls, context) -> GameStructure | None:
         settings = cls.settings(context)
         return settings.project_root
 
 
+@io_soulstruct_operator
 class SelectImageCacheDirectory(LoggingImportOperator):
     """Browse for global image cache directory."""
     bl_idname = "soulstruct.select_image_cache_directory"
@@ -245,6 +254,7 @@ class SelectImageCacheDirectory(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SelectCustomMTDBNDFile(LoggingImportOperator):
     """Browse for custom MTDBND file."""
     bl_idname = "soulstruct.select_custom_mtdbnd_file"
@@ -261,6 +271,7 @@ class SelectCustomMTDBNDFile(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SelectCustomMATBINBNDFile(LoggingImportOperator):
     """Browse for custom MATBINBND file."""
     bl_idname = "soulstruct.select_custom_matbinbnd_file"
@@ -277,6 +288,7 @@ class SelectCustomMATBINBNDFile(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class LoadCollectionsFromBlend(LoggingImportOperator):
     """Load collections and objects from a '.blend' file by linking its root-level collections to this scene.
 

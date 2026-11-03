@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
 
-    from soulstruct.blender.general.properties import SoulstructSettings
+    from ..properties import SoulstructSettings
 
 
 

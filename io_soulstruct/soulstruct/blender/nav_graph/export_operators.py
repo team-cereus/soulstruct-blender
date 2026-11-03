@@ -10,11 +10,14 @@ import bpy
 from soulstruct.base.maps.navmesh.mcp import MCP
 from soulstruct.dcx import DCXType
 
-from soulstruct.blender.exceptions import SoulstructTypeError
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..exceptions import SoulstructTypeError
+from ..utilities import *
 from .types import BlenderMCG
 
 
+@io_soulstruct_operator
 class ExportAnyMCGMCP(LoggingExportOperator):
     """Export MCG from a Blender object containing a Nodes parent and an Edges parent.
 
@@ -137,6 +140,7 @@ class ExportAnyMCGMCP(LoggingExportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportMapMCGMCP(LoggingOperator):
     """Export MCG from a Blender object containing a Nodes parent and an Edges parent, and regenerate MCP.
 

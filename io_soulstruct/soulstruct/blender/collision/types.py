@@ -7,17 +7,19 @@ __all__ = [
 import typing as tp
 from pathlib import Path
 
+import numpy as np
+
 import bmesh
 import bpy
-import numpy as np
-from soulstruct.blender.base import BaseBlenderSoulstructObject
-from soulstruct.blender.exceptions import MapCollisionExportError
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
 
 from soulstruct.havok.enums import HavokModule
 from soulstruct.havok.fromsoft.shared.map_collision import *
 
+from ..base.operators import *
+from ..base.soulstruct_object import BaseBlenderSoulstructObject
+from ..exceptions import MapCollisionExportError
+from ..types import *
+from ..utilities import *
 from .properties import MapCollisionProps
 from .utilities import HKX_MATERIAL_NAME_RE
 
@@ -57,7 +59,7 @@ class BlenderMapCollision(BaseBlenderSoulstructObject[MapCollisionModel, MapColl
         context: bpy.types.Context,
         soulstruct_obj: MapCollisionModel,
         name: str,
-        collection: bpy.types.Collection = None,
+        collection: bpy.types.Collection | None = None,
         *,
         lo_collision: MapCollisionModel | None = None,  # optional
     ) -> tp.Self:
@@ -111,7 +113,7 @@ class BlenderMapCollision(BaseBlenderSoulstructObject[MapCollisionModel, MapColl
             bl_mesh.materials.append(material)
         bl_mesh.polygons.foreach_set("material_index", face_materials)
 
-        bl_map_collision = cls.new(name, bl_mesh, collection)
+        bl_map_collision = tp.cast(tp.Self, cls.new(name, bl_mesh, collection))
         # No further properties to assign.
         return bl_map_collision
 
@@ -304,7 +306,9 @@ class BlenderMapCollision(BaseBlenderSoulstructObject[MapCollisionModel, MapColl
         face_materials = []
         offset = initial_offset
         for mesh, bl_material_index in zip(collision.meshes, bl_material_indices, strict=True):
-            face_stack.append(mesh.faces[:, :3] + offset)
+            # Individual meshes use `uint16` face vertex indices. We may exceed that limit after
+            # combining them for large collisions, so the offset indices are recast to `uint32`.
+            face_stack.append(np.astype(mesh.faces[:, :3], np.uint32) + offset)
             vert_stack.append(mesh.vertices[:, :3])
             face_materials.extend([bl_material_index] * mesh.face_count)
             offset += mesh.vertex_count

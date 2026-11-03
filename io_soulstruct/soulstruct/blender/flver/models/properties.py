@@ -7,19 +7,20 @@ __all__ = [
     "FLVERBoneProps",
     "FLVERImportSettings",
     "FLVERExportSettings",
-    "flver_submesh_sync_handler",
 ]
 
+import logging
 import typing as tp
 
 import bpy
-from bpy.app.handlers import persistent
 
 from soulstruct.flver import FLVERBoneUsageFlags, FLVERVersion
 from soulstruct.games import *
 
-from soulstruct.blender.bpy_base.property_group import SoulstructPropertyGroup
-from soulstruct.blender.types import SoulstructType
+from ...base.register import *
+from ...bpy_base.property_group import SoulstructPropertyGroup
+
+_LOGGER = logging.getLogger("soulstruct.blender")
 
 
 class CollectedSubmeshProps(tp.NamedTuple):
@@ -30,16 +31,14 @@ class CollectedSubmeshProps(tp.NamedTuple):
     use_backface_culling: bool
 
 
+@io_soulstruct_properties
 class FLVERSubmeshProps(SoulstructPropertyGroup):
-    """Blender properties specified per FLVER material slot that determine submesh properties."""
+    """Blender properties specified per FLVER material slot that determine submesh properties.
+
+    NOTE: This property group is only used nested inside `FLVERProps`.
+    """
 
     # No game-specific properties.
-
-    material: bpy.props.PointerProperty(
-        type=bpy.types.Material,
-        name="Material",
-        description="Material linked to this submesh definition",
-    )
 
     is_dynamic: bpy.props.BoolProperty(
         name="Is Dynamic",
@@ -89,6 +88,8 @@ class FLVERSubmeshProps(SoulstructPropertyGroup):
         return ["is_dynamic", "default_bone_index", "face_set_count"]
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Object, "FLVER")
 class FLVERProps(SoulstructPropertyGroup):
     """Extension properties for all Blender Mesh objects that represent FLVER models.
 
@@ -218,7 +219,6 @@ class FLVERProps(SoulstructPropertyGroup):
         default=0,
     )
 
-    # TODO: Submesh properties, synced to material slots (difficult). Remove from Material properties...
     submesh_props: bpy.props.CollectionProperty(
         type=FLVERSubmeshProps,
         name="Submesh Properties",
@@ -246,6 +246,23 @@ class FLVERProps(SoulstructPropertyGroup):
         min=1,
         max=9,  # surely safe
     )
+
+    def get_all_dynamic_static(self) -> tuple[bool, bool]:
+        """Certain operations can be made more efficient if all meshes are dynamic or static.
+
+        This is the case for most FLVERs.
+
+        Returns a pair of bools: `all_dynamic`, `all_static`. At most one can be `True`.
+        """
+        if not self.submesh_props:
+            return self.global_is_dynamic, not self.global_is_dynamic
+
+        # Scan submeshes.
+        if all(prop.is_dynamic for prop in self.submesh_props):
+            return True, False  # all dynamic
+        elif all(not prop.is_dynamic for prop in self.submesh_props):
+            return False, True  # all static
+        return False, False  # mixture
 
     # INTERNAL USE
     bone_data_type: bpy.props.EnumProperty(
@@ -286,7 +303,8 @@ class FLVERProps(SoulstructPropertyGroup):
         """Generate effect submesh properties (for FLVER export) from materials or global settings."""
         
 
-
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Object, "FLVER_DUMMY")
 class FLVERDummyProps(SoulstructPropertyGroup):
     """Extension properties for Blender objects that represent FLVER Dummy objects."""
 
@@ -297,8 +315,8 @@ class FLVERDummyProps(SoulstructPropertyGroup):
         description="Dummy transform in FLVER file is stored relative to this FLVER bone. NOT the same as the Dummy "
                     "attach bone that can be followed during animations, which is set as its real Blender parent",
     )
-    color_rgba: bpy.props.IntVectorProperty(
-        name="Color RGBA",
+    color: bpy.props.IntVectorProperty(
+        name="Color",
         description="Color of the Dummy object (8-bit channels). Not used in-game but useful for model visualization",
         size=4,
         default=(255, 255, 255, 255),
@@ -329,6 +347,8 @@ class FLVERDummyProps(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Bone, "FLVER_BONE")
 class FLVERBoneProps(SoulstructPropertyGroup):
     """Extension properties for Blender Bones that represent FLVER bones.
 
@@ -392,6 +412,8 @@ class FLVERBoneProps(SoulstructPropertyGroup):
         return flags
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "flver_import_settings")
 class FLVERImportSettings(SoulstructPropertyGroup):
     """Common FLVER import settings.
 
@@ -463,6 +485,8 @@ class FLVERImportSettings(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "flver_export_settings")
 class FLVERExportSettings(SoulstructPropertyGroup):
     """Common FLVER export settings. Drawn manually in operator browser windows."""
 
@@ -508,100 +532,3 @@ class FLVERExportSettings(SoulstructPropertyGroup):
         min=0.0,
         max=1.0,
     )
-
-
-def _sync_submesh_props(bl_flver_obj: bpy.types.Object):
-    """Sync FLVER submesh properties collection to match the current materials in the FLVER object's material slots."""
-
-    props = bl_flver_obj.FLVER.submesh_props  # type: bpy.types.CollectionProperty
-
-    # If props is empty, ignore this object (uses global FLVER submesh settings).
-    if not props:
-        return
-
-    slots = bl_flver_obj.material_slots
-
-    # Build current material list from slots.
-    current = [s.material for s in slots]  # type: list[bpy.types.Material]
-    # Build stored material list from our collection.
-    stored = [p.material for p in props]  # type: list[bpy.types.Material]
-
-    if current == stored:
-        return  # materials have not changed (in a way we can detect, at least)
-
-    diff = len(current) - len(stored)
-
-    if diff == -1:
-        # Material deletion: find the index present in stored but missing in current.
-        for i in range(len(stored)):
-            # Check if removing index i from stored gives us current.
-            if stored[:i] + stored[i + 1:] == current:
-                props.remove(i)
-                return
-
-    elif diff == 1:
-        # Material addition. Iterate through current and stored until we find the first index where they differ,
-        # which should be the new material. But first check the usual case of the addition being at the end.
-        if current[:-1] == stored:
-            entry = props.add()
-            entry.material = current[-1]
-            return
-        for i in range(len(stored)):
-            if current[i] != stored[i]:
-                entry = props.add()
-                entry.material = current[i]
-                # Move the new entry to index i.
-                props.move(len(props) - 1, i)
-                return
-
-    elif diff == 0:
-
-        # Check for case where a previously unassigned material is now assigned.
-        for current_mat, stored_mat in zip(current, stored):
-            if current_mat != stored_mat:
-                if current_mat and not stored_mat:
-                    # Material was assigned at this slot.
-                    props[current.index(current_mat)].material = current_mat
-                    return
-                elif not current_mat and stored_mat:
-                    # Material was unassigned at this slot.
-                    props[current.index(stored_mat)].material = None
-                    return
-
-        if len(current) >= 2:
-            # Swap: find the one pair of adjacent indices that differs
-            mismatches = [i for i in range(len(current)) if current[i] != stored[i]]
-            if (
-                len(mismatches) == 2
-                and mismatches[1] == mismatches[0] + 1
-            ):
-                i = mismatches[0]
-                props.move(i, i + 1)
-                return
-
-    # Fallback: couldn't identify the change cleanly.
-    # Rebuild from scratch (loses submesh data for ambiguous cases).
-    props.clear()
-    print(
-        f"# WARNING: Could not track material changes for submesh properties on FLVER object '{bl_flver_obj.name}'. "
-        f"Rebuilding submesh properties from current materials, but any custom submesh property values will be lost."
-    )
-    for mat in current:
-        entry = props.add()
-        entry.material = mat
-        entry.is_dynamic = bl_flver_obj.FLVER.global_is_dynamic
-        entry.default_bone_index = bl_flver_obj.FLVER.global_default_bone_index
-        entry.face_set_count = bl_flver_obj.FLVER.global_face_set_count
-        entry.use_backface_culling = "MATERIAL"
-
-
-@persistent  # prevent Blender from unloading handler when a new file is loaded
-def flver_submesh_sync_handler(scene: bpy.types.Scene, _depsgraph: bpy.types.Depsgraph):
-    """Scan scene for FLVER objects and synchronize their submesh properties to their materials."""
-    for obj in scene.objects:
-        if (
-            obj.type == "MESH"
-            and obj.soulstruct_type == SoulstructType.FLVER
-            and len(obj.FLVER.submesh_props) > 0  # ignore objects using global submesh properties
-        ):
-            _sync_submesh_props(obj)

@@ -1,6 +1,7 @@
-# Soulstruct for Blender
+# Soulstruct Extension for Blender
 
-This Blender add-on enables you to import and export a large number of different FromSoftware file formats.
+This Blender Extension add-on enables you to import a large number of different FromSoftware file formats,
+manipulate their data in Blender, and export them back to game files.
 
 ### team-cereus fork (ER / Nightreign animation + Stan's Tools)
 
@@ -21,20 +22,21 @@ Details, updates and uninstall: [`installer/README.md`](installer/README.md).
 | [`docs/STAN_TOOLS_WORKFLOW.md`](docs/STAN_TOOLS_WORKFLOW.md) | Full animator pipeline: Blender ↔ DSAS ↔ ModEngine, tools used, troubleshooting |
 | [`DEV_ER_ANIMATION.md`](DEV_ER_ANIMATION.md) | Havok verification, junction install, export notes, submodule layout |
 
-Requires **Blender 4.1+** (5.1 tested). Enable add-on via junction to `io_soulstruct` + `io_soulstruct_lib` — see `DEV_ER_ANIMATION.md` §2.
+Requires **Blender 5.1+**. Enable add-on via junction to `io_soulstruct` + `io_soulstruct_lib` — see `DEV_ER_ANIMATION.md` §2.
 
-It's powered by [Soulstruct](https://github.com/Grimrukh/soulstruct), my giant Python library of FromSoftware formats, and Soulstruct Havok, an 
-experimental expansion library.
+It's powered by:
+- [Soulstruct](https://github.com/Grimrukh/soulstruct), my giant Python library of FromSoftware formats.
+- [Soulstruct Havok](https://github.com/Grimrukh/soulstruct-havok), an experimental expansion library for Havok formats.
+- [Firelink](https://github.com/Grimrukh/Firelink), my newer C++ FromSoftware library with a Python binding layer called `pyrelink` bindings.
+  - This library is now used for core file formats (Binder, FLVER), texture conversion, and specific file formats that 
+  are so large and complex that Python I/O is too slow (e.g. Elden Ring MSBs).
 
 I developed these tools over the years in parallel with the development of Dark Souls: Nightfall, and finally put aside
 some time to polish and release them. I hope they serve you well and anticipate whatever mods they enable :)
 
-**Blender 4.1 or later is required.** Earlier Blender versions use Python 3.10 (released in 2021), which I sadly do not
-have the bandwidth or inclination to support any longer in Soulstruct. Surface vertex normal handling was also greatly
-improved in Blender 4.1, making FLVER import/export significantly easier.
-
-Older releases (<=1.9.3) are still available in the Releases section, which support Blender versions all the
-way back to 3.7, but lack many features and are no longer updated.
+**Blender 5.1 or later is required.** Blender 5.1 introduced native DirectX texture support and upgraded the internal
+Python version to 3.13, meaning I can save bandwidth for supporting older Python versions across the whole Soulstruct 
+ecosystem.
 
 ## Table of Contents
 
@@ -88,11 +90,16 @@ happy to consider it as a commission (which is how Demon's Souls support was add
 However, before you ask, it's **unlikely that Collision export support will expand much further**. Havok's collision
 physics system changed radically in 2014 (Bloodborne onwards) and I don't have the tools (or expensive Havok SDK) to be
 able to regenerate the bounding volume tree structures in these newer files (`hkcd` and `hknp` Havok classes). I may
-eventually add import support so you can at least view the collision meshes in Blender, though.
+eventually add import support so you can at least view the collision meshes in Blender, though. Other modders have had
+success using Havok tools contained in the game executable to regenerate navmeshes.
 
 # Installation
 
-**Blender 4.1+** is required (Python 3.11+). This **team-cereus** fork ships `soulstruct` and `soulstruct-havok` as
+The easy way is the one-line installer at the top of this README ([`installer/README.md`](installer/README.md)).
+Upstream's Blender Extension zip installs upstream's PyPI `soulstruct` / `soulstruct-havok`, **not** this fork's
+Elden Ring / Nightreign libraries, so do not install the fork that way.
+
+**Blender 5.1+** is required (Python 3.13). This **team-cereus** fork ships `soulstruct` and `soulstruct-havok` as
 git submodules under `io_soulstruct_lib/`. You need **both** `io_soulstruct` and `io_soulstruct_lib` beside each other in
 Blender's add-ons folder.
 
@@ -493,4 +500,3 @@ material shaders may not be handled well or at all.
 
 If you come across any problems or bugs, please file a Git bug report to help me improve the add-on.
 
-Version 2.0 was a signifificant overhaul, so bare with me if any new bugs have appeared.

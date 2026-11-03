@@ -7,24 +7,20 @@ import typing as tp
 import numpy as np
 
 import bpy
-from mathutils import Matrix, Quaternion as BLQuaternion
+from mathutils import Vector, Quaternion as BLQuaternion
 
 from soulstruct.dcx import DCXType
 from soulstruct.games import *
 from soulstruct.havok.fromsoft.base import BaseSkeletonHKX, BaseAnimationHKX
-from soulstruct.havok.fromsoft.darksouls1r.remobnd import *
 from soulstruct.havok.fromsoft.demonssouls import AnimationHKX as DES_AnimationHKX, SkeletonHKX as DES_SkeletonHKX
 from soulstruct.havok.utilities.maths import TRSTransform
 
-from soulstruct.blender.flver.utilities import (
-    bl_bone_matrix_to_game_trs,
-    game_bone_transform_to_bl_bone_matrix,
-    get_armature_matrix,
-    get_basis_matrix,
-)
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..flver.utilities import game_trs_to_bl_bone_trs, bl_bone_trs_to_game_trs
+from ..flver.models.types import BlenderFLVER, FLVERBoneDataType
+from ..exceptions import *
+from ..types import *
+from ..utilities import *
 from .utilities import *
 
 
@@ -39,31 +35,31 @@ class GameAnimationInfo(tp.NamedTuple):
 class SoulstructAnimation:
 
     GAME_ANIMATION_INFO_CHR = {
-        DEMONS_SOULS: GameAnimationInfo(
+        GameType.DemonsSouls: GameAnimationInfo(
             relative_binder_path="chr/{model_name}/{model_name}.anibnd",  # additional nested folder
             stem_template="##_####",
             hkx_entry_path="N:\\DemonsSoul\\data\\Model\\chr\\{model_name}\\hkx\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        DARK_SOULS_PTDE: GameAnimationInfo(
+        GameType.DarkSoulsPTDE: GameAnimationInfo(
             relative_binder_path="chr/{model_name}.anibnd",
             stem_template="##_####",
             hkx_entry_path="N:\\FRPG\\data\\Model\\chr\\{model_name}\\hkxwin32\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        DARK_SOULS_DSR: GameAnimationInfo(
+        GameType.DarkSoulsDSR: GameAnimationInfo(
             relative_binder_path="chr/{model_name}.anibnd",
             stem_template="##_####",
             hkx_entry_path="N:\\FRPG\\data\\Model\\chr\\{model_name}\\hkxx64\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        BLOODBORNE: GameAnimationInfo(
+        GameType.Bloodborne: GameAnimationInfo(
             relative_binder_path="chr/{model_name}.anibnd",
             stem_template="###_######",
             hkx_entry_path="N:\\SPRJ\\data\\INTERROOT_ps4\\chr\\{model_name}\\hkx\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        ELDEN_RING: GameAnimationInfo(
+        GameType.EldenRing: GameAnimationInfo(
             relative_binder_path="chr/{model_name}.anibnd",
             stem_template="###_######",
             hkx_entry_path=(  # note new variable `div_id` for DivXX ANIBNDs, which should end in '_' if non-empty
@@ -71,7 +67,7 @@ class SoulstructAnimation:
             ),
             dcx_type=DCXType.Null,
         ),
-        NIGHTREIGN: GameAnimationInfo(
+        GameType.Nightreign: GameAnimationInfo(
             relative_binder_path="chr/{model_name}.anibnd",
             stem_template="###_######",
             hkx_entry_path=(
@@ -82,25 +78,25 @@ class SoulstructAnimation:
     }
 
     GAME_ANIMATION_INFO_OBJ = {
-        DEMONS_SOULS: GameAnimationInfo(
+        GameType.DemonsSouls: GameAnimationInfo(
             relative_binder_path="obj/{model_name}.objbnd",  # no additional nested folder, unlike `chr`
             stem_template="##_####",
             hkx_entry_path="N:\\DemonsSoul\\data\\Model\\obj\\{model_name}\\hkx\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        DARK_SOULS_PTDE: GameAnimationInfo(
+        GameType.DarkSoulsPTDE: GameAnimationInfo(
             relative_binder_path="obj/{model_name}.objbnd",
             stem_template="##_####",
             hkx_entry_path="N:\\FRPG\\data\\Model\\obj\\{model_name}\\hkxwin32\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        DARK_SOULS_DSR: GameAnimationInfo(
+        GameType.DarkSoulsDSR: GameAnimationInfo(
             relative_binder_path="obj/{model_name}.objbnd",
             stem_template="##_####",
             hkx_entry_path="N:\\FRPG\\data\\Model\\obj\\{model_name}\\hkxx64\\{animation_stem}.hkx",
             dcx_type=DCXType.Null,
         ),
-        BLOODBORNE: GameAnimationInfo(
+        GameType.Bloodborne: GameAnimationInfo(
             relative_binder_path="obj/{model_name}.objbnd",
             stem_template="###_######",
             hkx_entry_path="N:\\SPRJ\\data\\INTERROOT_ps4\\obj\\{model_name}\\hkx\\{animation_stem}.hkx",
@@ -174,6 +170,17 @@ class SoulstructAnimation:
         except ValueError:
             raise ValueError(f"Could not parse animation ID from Action name '{self.name}'.")
 
+    @property
+    def action_slot(self) -> bpy.types.ActionSlot:
+        """Return first action slot."""
+        return self.action.slots[0]
+
+    @property
+    def channelbag(self) -> bpy.types.ActionChannelbag:
+        """Return channelbag of first layer, strip, and action slot."""
+        strip = self.action.layers[0].strips[0]
+        return strip.channelbag(self.action.slots[0], ensure=True)
+
     @classmethod
     def from_armature_animation_data(cls, armature: ArmatureObject) -> SoulstructAnimation:
         """Load from current animation data of given `armature`."""
@@ -190,26 +197,21 @@ class SoulstructAnimation:
         cls,
         operator: LoggingOperator,
         context: Context,
-        animation_hkx: ANIMATION_TYPING,
-        skeleton_hkx: SKELETON_TYPING,
+        animation_hkx: BaseAnimationHKX,
+        skeleton_hkx: BaseSkeletonHKX,
         name: str,
         armature_obj: ArmatureObject,
         model_name: str,
+        bone_data_type: FLVERBoneDataType = FLVERBoneDataType.OMITTED,
     ) -> SoulstructAnimation:
-        """Create a new wrapped Blender Action from the given HKX animation data.
-
-        If `root_motion_bone_name` is given, the HKX animation's root motion will be applied to that bone instead of the
-        object's location and Z-axis rotation. This allows MSB Parts to be animated 'in place', with root motion being
-        previewed by the root motion bone instead of the object itself. (Note that Cutscene animations do NOT use this,
-        as their root
-        """
+        """Create a new wrapped Blender Action from the given HKX animation data."""
         operator.info(f"Importing HKX animation to Armature '{armature_obj.name}': '{name}' (30 FPS, 1:1 frames)")
 
         # We cannot rely on track annotations for bone names in all games (e.g. Demon's Souls, Elden Ring).
         # In Elden Ring, some HKX skeletons also animate 'Twist' bones that are not actually present in the FLVER. We
         # handle and warn about these cases, rather than throwing.
         hk_bone_names = [b.name for b in skeleton_hkx.skeleton.bones]
-        track_bone_indices = animation_hkx.animation_container.hkx_binding.transformTrackToBoneIndices
+        track_bone_indices = animation_hkx.animation_container.get_track_bone_indices()
         track_bone_names = [hk_bone_names[i] for i in track_bone_indices]
         bl_bone_names = [b.name for b in armature_obj.data.bones]
 
@@ -226,6 +228,19 @@ class SoulstructAnimation:
         arma_frames = get_armature_frames(interleaved_animation_hkx, skeleton_hkx)
         root_motion = get_root_motion(interleaved_animation_hkx)
         operator.debug(f"Constructed armature animation frames in {time.perf_counter() - p:.3f} s.")
+
+        # A FLVER may contain two bones with the same game name, in which case FLVER import renamed all but the first
+        # to '{name} <DUPE>'. The HKX skeleton has no such collision, so we must work out which Blender bone each
+        # animated name really refers to (by rest position) rather than blindly taking the first (e.g. DeS c6041).
+        bone_renames = resolve_duplicate_animated_bone_names(
+            operator, armature_obj, skeleton_hkx, set(track_bone_names)
+        )
+        if bone_renames:
+            track_bone_names = [bone_renames.get(n, n) for n in track_bone_names]
+            for frame in arma_frames:
+                for old_name, new_name in bone_renames.items():
+                    if old_name in frame:
+                        frame[new_name] = frame.pop(old_name)
 
         # Note that it's common for the HKX animation to not animate all bones in the FLVER, but we do warn if there
         # are any bones in the HKX animation that are not in the FLVER.
@@ -248,6 +263,7 @@ class SoulstructAnimation:
                 armature_obj=armature_obj,
                 arma_frames=arma_frames,
                 root_motion=root_motion,
+                bone_data_type=bone_data_type,
             )
         except Exception as ex:
             traceback.print_exc()
@@ -264,7 +280,7 @@ class SoulstructAnimation:
         armature_obj: ArmatureObject,
         arma_frames: list[dict[str, TRSTransform]] | None,
         root_motion: np.ndarray | None = None,  # shape (n_frames, 4) or None
-        root_motion_bone_name="",
+        bone_data_type: FLVERBoneDataType = FLVERBoneDataType.OMITTED,
     ) -> SoulstructAnimation:
         """Import single animation HKX.
 
@@ -330,29 +346,31 @@ class SoulstructAnimation:
         action = None  # type: bpy.types.Action | None
         original_location = armature_obj.location.copy()  # TODO: not necessary with batch method?
         try:
-            armature_obj.animation_data_create()
-            action = bpy.data.actions.new(name=action_name)
-            action_slot = action.slots.new(id_type="OBJECT", name=armature_obj.name)
-            # Create layer and strips (both unique).
-            layer = action.layers.new("Layer")
-            strip = layer.strips.new(type="KEYFRAME")
-            channelbag = strip.channelbag(action_slot, ensure=True)
+            action, action_slot, channelbag = create_action_slot_channelbag(armature_obj, action_name)
 
             if arma_frames:
+
+                try:
+                    bone_data_type = BlenderFLVER.from_armature_or_mesh(armature_obj).bone_data_type
+                except SoulstructTypeError:
+                    # Assume no CoB in edit bones.
+                    bone_data_type = FLVERBoneDataType.CUSTOM
+
                 bone_basis_samples = cls.get_bone_basis_samples(
                     armature_obj,
                     arma_frames,
-                    cls.get_armature_local_inv_matrices(armature_obj),
+                    get_armature_rest_trs(armature_obj),
                     bl_frames_per_game_frame,
+                    bone_data_type,
+                    flver_rest_scales=get_flver_bone_rest_scales(armature_obj, bone_data_type),
                 )
             else:
                 bone_basis_samples = {}
 
-            cls._add_keyframes_batch(
+            add_keyframes_batch(
                 channelbag,
                 bone_basis_samples,
                 root_motion,
-                root_motion_bone_name,
             )
 
         except Exception:
@@ -361,183 +379,59 @@ class SoulstructAnimation:
             armature_obj.location = original_location  # reset location (i.e. erase last root motion)
             raise
 
+        # Action has been set.
+        action: bpy.types.Action
+
         # Set Action and Slot on Armature object (NOT Armature data).
         armature_obj.animation_data.action = action
         armature_obj.animation_data.action_slot = action_slot
         # Ensure action is not deleted when not in use.
         action.use_fake_user = True
         # Update all F-curves and make them cycle.
-        for fcurve in action.layers[0].strips[0].channelbag(action_slot, ensure=True).fcurves:
+        for fcurve in channelbag.fcurves:
             fcurve.modifiers.new("CYCLES")  # default settings are fine
             fcurve.update()
-        # Update Blender timeline start/stop times.
-        context.scene.frame_start = int(action.frame_range[0])
-        context.scene.frame_end = int(action.frame_range[1])
-        context.scene.frame_set(context.scene.frame_start)
 
+        # Fork 30 FPS workflow: one Blender frame per game sample, so force the scene to native 30 FPS.
         if context.scene.render.fps != 30 or context.scene.render.fps_base != 1:
             context.scene.render.fps = 30
             context.scene.render.fps_base = 1
 
-        return cls(action)
-
-    @classmethod
-    def new_from_cutscene_cuts(
-        cls,
-        context: Context,
-        action_name: str,
-        armature_or_dummy: EmptyObject | ArmatureObject,
-        arma_cuts: list[list[RemoPartAnimationFrame] | int],
-        is_root_motion_only=False,
-    ) -> SoulstructAnimation:
-        """Create a Blender Action that combines all the given cuts in `all_cut_arma_frames`, read from RemoBND.
-
-        TODO: Blender 4.4+ now supports action slots, so a single cutscene Action can be created and shared across all
-         member Armature/Empty objects of the cutscene using their own slots.
-        """
-        to_60_fps = context.scene.cutscene_import_settings.to_60_fps
-        bl_frames_per_game_frame = 2.0 if to_60_fps else 1.0
-
-        action = None  # type: bpy.types.Action | None
-        original_location = armature_or_dummy.location.copy()  # TODO: not necessary with batch method?
-
-        # Record indices of last frame in each cut to set CONSTANT interpolation afterward.
-        # Note that these are keyframe `co.x` values, not just indices (but compared as integers).
-        cut_end_keyframe_x = []  # type: list[float]
-        frame_count = 0
-        for arma_frames in arma_cuts:
-            if isinstance(arma_frames, int):
-                frame_count += arma_frames
-            else:
-                frame_count += len(arma_frames)
-            cut_end_keyframe_x.append(int(bl_frames_per_game_frame * (frame_count - 1)))
-
-        try:
-            armature_or_dummy.animation_data_create()
-            action = bpy.data.actions.new(name=action_name)
-            action_slot = action.slots.new(id_type="OBJECT", name=armature_or_dummy.name)
-            # Create layer and strips (both unique).
-            layer = action.layers.new("Layer")
-            strip = layer.strips.new(type="KEYFRAME")
-            channelbag = strip.channelbag(action_slot, ensure=True)
-
-            if not is_root_motion_only:
-                if armature_or_dummy.type != "ARMATURE":
-                    raise ValueError(
-                        "Cutscene animation can only be applied to an Empty (Dummy) with `is_root_motion_only=True`."
-                    )
-                armature_or_dummy: ArmatureObject
-                arma_local_inv_matrices = cls.get_armature_local_inv_matrices(armature_or_dummy)  # used by every frame
-            else:
-                arma_local_inv_matrices = {}  # unused
-
-            # We concatenate all bone basis samples for each cut. Only actual animated bones appear in it.
-            # The cut sub-arrays that appear in here
-            bone_basis_sample_arrays = {}  # type: dict[str, list[np.ndarray]]
-            root_motion_rows = []  # type: list[list[float]]
-
-            global_keyframe_t = 0.0
-            for arma_cut_frames in arma_cuts:
-                if isinstance(arma_cut_frames, int):
-                    # Skip this many (game) frames. (Last cut will still put CONSTANT interpolation at the end.)
-                    global_keyframe_t += arma_cut_frames * bl_frames_per_game_frame
-                    continue
-
-                bone_arma_frames = [frame.bone_transforms for frame in arma_cut_frames]
-                # Get bone basis samples if ANY frame has bone animation data.
-                if not is_root_motion_only and any(bone_arma_frames):
-                    cut_bone_basis_samples = cls.get_bone_basis_samples(
-                        armature_or_dummy,
-                        [frame.bone_transforms for frame in arma_cut_frames],
-                        arma_local_inv_matrices,
-                        bl_frames_per_game_frame,
-                    )
-                    for bone_name, basis_samples in cut_bone_basis_samples.items():
-                        # Add global keyframe time to first column.
-                        basis_samples[:, 0] += global_keyframe_t
-                        if bone_name not in bone_basis_sample_arrays:
-                            bone_basis_sample_arrays[bone_name] = []
-                        bone_basis_sample_arrays[bone_name].append(basis_samples)
-
-                # Root motion. Note that root motion is ALWAYS present in cutscene animations, even if all identity.
-                # We increment `global_keyframe_t` within here.
-                for frame in arma_cut_frames:
-                    # TODO: Theoretically, cutscene root motion supports full rotation. Just doing Z (-Y) for now.
-                    rm_translate = to_blender(frame.root_motion.translation)
-                    rm_rotate_z = -frame.root_motion.rotation.to_euler_angles_rad(order="xzy").y
-                    root_motion_rows.append(
-                        [global_keyframe_t, rm_translate.x, rm_translate.y, rm_translate.z, rm_rotate_z]
-                    )
-                    global_keyframe_t += bl_frames_per_game_frame
-
-            if bone_basis_sample_arrays:
-                bone_basis_samples = {
-                    bone_name: np.concatenate(basis_sample_arrays)
-                    for bone_name, basis_sample_arrays in bone_basis_sample_arrays.items()
-                }
-            else:
-                bone_basis_samples = {}
-
-            root_motion = np.array(root_motion_rows)
-
-            cls._add_keyframes_batch(
-                channelbag,
-                bone_basis_samples,
-                root_motion=root_motion,
-                root_motion_bone_name="",  # root motion drives Armature transform directly
-            )
-        except Exception:
-            if action:
-                bpy.data.actions.remove(action)
-            armature_or_dummy.location = original_location  # reset location (i.e. erase last root motion)
-            raise
-
-        # Set Action and Slot on Armature/Dummy object.
-        armature_or_dummy.animation_data.action = action
-        armature_or_dummy.animation_data.action_slot = action_slot
-        # Set constant interpolation at the ends of cuts.
-        for fcurve in action.layers[0].strips[0].channelbag(action_slot, ensure=True).fcurves:
-            for keyframe in fcurve.keyframe_points:
-                if int(keyframe.co.x) in cut_end_keyframe_x:
-                    keyframe.interpolation = "CONSTANT"
-
-        # Ensure action is not deleted when not in use.
-        action.use_fake_user = True
-        # No CYCLES modifier.
+        animation = cls(action)
         # Update Blender timeline start/stop times.
-        # TODO: Don't bother doing this here. The caller should set the range to the maximal cutscene range after.
-        context.scene.frame_start = int(action.frame_range[0])
-        context.scene.frame_end = int(action.frame_range[1])
-        context.scene.frame_set(context.scene.frame_start)
-
-        return cls(action)
-
-    @staticmethod
-    def get_armature_local_inv_matrices(armature: ArmatureObject) -> dict[str, Matrix]:
-        """Return a dictionary mapping Blender bone names to their inverted `matrix_local` transforms.
-
-        NOTE: We stay in our custom 'FromSoft bone space' coordinates here (X-forward), since this is intended only for
-        use within bone transform calculations.
-        """
-        return {
-            bone.name: bone.matrix_local.inverted()
-            for bone in armature.data.bones
-        }
+        animation.set_scene_frame_range(context, reset_current_frame=True)
+        return animation
 
     @staticmethod
     def get_bone_basis_samples(
         armature: ArmatureObject,
         arma_frames: list[dict[str, TRSTransform]],
-        arma_local_inv_matrices: dict[str, Matrix],
+        rest_trs_by_bone_name: dict[str, tuple[Vector, BLQuaternion, Vector]],
         bl_frames_per_game_frame: float,
+        bone_data_type: FLVERBoneDataType,
+        assert_root_bone_names: tp.Container[str] = (),
+        flver_rest_scales: dict[str, Vector] | None = None,
     ) -> dict[str, np.ndarray]:
         """Convert a list of Armature-space frames, where each frame is a `dict[bone_name: str, TRSTransform]`, to an
         outer dictionary that maps bone names to an array of 11 bone basis-space keyframe values:
             t, location XYZ, rotation quaternion WXYZ, scale XYZ
+
+        Uses shear-free TRS composition (`get_basis_trs()`) rather than 4x4 matrix algebra to derive each bone's pose
+        basis relative to its parent. A plain matrix ratio between a non-uniformly-scaled parent's armature-space
+        target and a rotated child's target generally contains shear, which `Matrix.decompose()` would silently
+        discard; Havok's own bone hierarchy composition never produces such shear in the first place, so neither
+        should ours. Likewise, the game -> Blender coordinate conversion and the X-forward bone CoB are applied at TRS
+        level, never via `Matrix.decompose()`, so negative bone scale (which Havok animations do use) survives exactly.
+
+        `flver_rest_scales` (see `get_flver_bone_rest_scales()`) maps bone names to FLVER local bone scale that the
+        Blender rest pose could not store, in Blender bone space. Each such bone's armature-space pose scale is divided
+        by it, since the game's bind pose carries that scale and cancels it out when skinning, while Blender's does
+        not. Without this, e.g. DeS c5010's pauldron bones (FLVER scale 3.1285) are scaled up 3.13x by every animation.
         """
 
-        # Convert armature-space frame data to Blender `(location, rotation_quaternion, scale)` tuples.
-        # Note that we decompose the basis matrices so that quaternion discontinuities are handled properly.
+        flver_rest_scales = flver_rest_scales or {}
+
+        # We negate double-cover quaternions to improve interpolation between adjacent frames.
         last_frame_rotations = {}  # type: dict[str, BLQuaternion]
         frame_count = len(arma_frames)
 
@@ -550,47 +444,56 @@ class SoulstructAnimation:
         for frame_i, frame in enumerate(arma_frames):
             # `frame_i` is used to index array rows (created above).
 
-            bl_arma_matrices = {}
+            bl_pose_trs = {}  # type: dict[str, tuple[Vector, BLQuaternion, Vector]]
             for bone_name, trs in frame.items():
-                # This function applies Game -> Blender CoB, then bone CoB.
-                bl_arma_matrices[bone_name] = game_bone_transform_to_bl_bone_matrix(
-                    trs.translation,
-                    trs.rotation.to_matrix3(),
-                    trs.scale,
-                )
-            cached_arma_inv_matrices = {}  # cached for frame as needed
+                if bone_data_type == FLVERBoneDataType.EDIT:
+                    # Account for EditBone change of basis (at TRS level, so scale signs are preserved exactly).
+                    t, r, bone_scale = game_trs_to_bl_bone_trs(trs)
+                else:
+                    # Standard conversion, no CoB in edit bones to account for.
+                    t, r, bone_scale = game_trs_to_bl_trs(trs)
+                rest_scale = flver_rest_scales.get(bone_name)
+                if rest_scale is not None:
+                    # Remove the FLVER rest bone scale that Blender's rest pose cannot store (but the game's bind
+                    # pose does carry and cancel out). Component-wise, so scale signs are preserved exactly.
+                    bone_scale = Vector((
+                        bone_scale.x / rest_scale.x,
+                        bone_scale.y / rest_scale.y,
+                        bone_scale.z / rest_scale.z,
+                    ))
+                bl_pose_trs[bone_name] = (t, r, bone_scale)
 
-            for bone_name, bl_arma_matrix in bl_arma_matrices.items():
+            for bone_name, pose_trs in bl_pose_trs.items():
                 basis_samples = bone_basis_samples[bone_name]
 
-                bl_edit_bone = armature.data.bones[bone_name]
+                bl_edit_bone = tp.cast(bpy.types.Bone, armature.data.bones[bone_name])
+                rest_trs = rest_trs_by_bone_name[bone_name]
 
-                if (
-                    bl_edit_bone.parent is not None
-                    and bl_edit_bone.parent.name not in cached_arma_inv_matrices
-                ):
-                    # Cache parent's inverted armature matrix (might be needed by other sibling bones this frame).
-                    # Note that as FLVER and HKX skeleton hierarchies may be different, the FLVER (Blender Armature)
-                    # parent bone may not even be animated, in which case we just use an identity matrix.
-                    parent_name = bl_edit_bone.parent.name
-                    if parent_name in bl_arma_matrices:
-                        cached_arma_inv_matrices[parent_name] = bl_arma_matrices[parent_name].inverted()
-                    else:
-                        cached_arma_inv_matrices[parent_name] = Matrix.Identity(4)
+                if bl_edit_bone.parent is not None and bone_name not in assert_root_bone_names:
+                    parent_bone_name = bl_edit_bone.parent.name
+                    parent_rest_trs = rest_trs_by_bone_name[parent_bone_name]
+                    # As FLVER and HKX skeleton hierarchies may be different, the FLVER (Blender Armature) parent
+                    # bone may not even be animated in this frame's data. Such a bone keeps an IDENTITY BASIS, which
+                    # leaves it posed at its REST transform -- NOT at the identity transform. Defaulting to identity
+                    # here made Blender's forward kinematics apply the parent's full rest transform on top of the
+                    # target, which (since every EditBone rest matrix bakes in the X-forward bone CoB, a 180-degree
+                    # rotation about the Y+Z diagonal) flipped the whole bone chain upside down. DeS c2075 hits this
+                    # via its extra un-animated FLVER root `Ctl_master`, and c6041 via a duplicate bone name (its real
+                    # skeleton root is renamed `c6041 <DUPE>`, so the animation's `c6041` track binds elsewhere).
+                    parent_pose_trs = bl_pose_trs.get(parent_bone_name, parent_rest_trs)
+                else:
+                    # Consider this bone as a root bone when calculating basis.
+                    parent_rest_trs = None
+                    parent_pose_trs = None
 
-                bl_basis_matrix = get_basis_matrix(
-                    armature,
-                    bone_name,
-                    bl_arma_matrix,
-                    cached_arma_inv_matrices,
-                    arma_local_inv_matrices,
-                )
-
-                t, r, s = bl_basis_matrix.decompose()
+                t, r, s = get_basis_trs(rest_trs, parent_rest_trs, pose_trs, parent_pose_trs)
 
                 if bone_name in last_frame_rotations:
                     if last_frame_rotations[bone_name].dot(r) < 0.0:
                         r.negate()  # negate quaternion to avoid discontinuity (reverse direction of rotation)
+                elif r.w < 0.0:
+                    # Frame 0: canonicalize sign (W >= 0) so round-trips always start from the same hemisphere.
+                    r.negate()
 
                 basis_samples[frame_i] = [keyframe_t, *t, *r, *s]
                 last_frame_rotations[bone_name] = r
@@ -599,112 +502,20 @@ class SoulstructAnimation:
 
         return bone_basis_samples
 
-    @staticmethod
-    def _add_keyframes_batch(
-        channelbag: bpy.types.ActionChannelbag,
-        bone_basis_samples: dict[str, np.ndarray],
-        root_motion: np.ndarray | None,
-        root_motion_bone_name: str = "",
-    ):
-        """Faster method of adding all bone and (optional) root keyframe data.
-
-        Constructs `FCurves` with known length and uses `foreach_set` to batch-set all the `.co` attributes of the
-        curve keyframe points at once.
-
-        `bone_basis_samples` should map bone names to a `frame_count x 11` array of data, where the 11 columns are:
-            keyframe_t, location XYZ, quaternion WXYZ, scale XYZ
-        Here, the `t` column should already be scaled as desired for the frame rate conversion, e.g. (0, 2, 4, ...)
-        at 30 FPS (one Blender frame per game sample).
-
-        If `root_motion_bone_name` is given (non-empty), root motion will be applied to the bone with that name.
-        Otherwise, it will be applied directly to the object's local transform (location and Z-axis rotation).
-        """
-
-        def _new_fcurve(data_path_: str, index_: int) -> bpy.types.FCurve:
-            """Helper to create an FCurve for the given data path and index."""
-            return channelbag.fcurves.new(data_path=data_path_, index=index_)
-
-        # Initialize FCurves for root motion and bones.
-        if root_motion is not None:
-            if root_motion.ndim != 2 or root_motion.shape[1] != 5:
-                raise ValueError(
-                    f"If given, root motion array must be 2D with 5 columns (`keyframe_t, x, y, z, rz`) not: "
-                    f"{root_motion.shape}"
-                )
-            if root_motion_bone_name:
-                # We animate the given bone name with root motion instead of the Armature transform.
-                data_path = f"pose.bones[\"{root_motion_bone_name}\"]"
-                root_fcurves = [
-                    _new_fcurve(f"{data_path}.location", i) for i in range(3)
-                ]
-                root_fcurves.append(
-                    _new_fcurve(f"{data_path}.rotation_euler", 2)
-                )  # Z
-            else:
-                root_fcurves = [
-                    _new_fcurve("location", i) for i in range(3)
-                ]
-                root_fcurves.append(
-                    _new_fcurve("rotation_euler", 2)
-                )  # Z
-        else:
-            root_fcurves = []
-
-        # If `bone_basis_samples` is empty, no bone FCurves will be created here.
-        bone_fcurves = {}
-        for bone_name in bone_basis_samples.keys():
-            bone_fcurves[bone_name] = []  # ten FCurves per bone
-            bone_fcurves[bone_name] += [
-                _new_fcurve(f"pose.bones[\"{bone_name}\"].location", i) for i in range(3)
-            ]
-            bone_fcurves[bone_name] += [
-                _new_fcurve(f"pose.bones[\"{bone_name}\"].rotation_quaternion", i) for i in range(4)
-            ]
-            bone_fcurves[bone_name] += [
-                _new_fcurve(f"pose.bones[\"{bone_name}\"].scale", i) for i in range(3)
-            ]
-
-        # Build lists of FCurve keyframe points by initializing their size and using `foreach_set`.
-        # Each keyframe point has a `.co` attribute to which we set `(t, value)` (per dimension).
-        # `foreach_set` requires that we flatten the list of tuples to be assigned, a la:
-        #    `[keyframe_t_0, value_0, keyframe_t_1, value_1, ...]`
-        # which we do with array column indexing and `ravel()`.
-        if root_fcurves:
-            # NOTE: There may be less root motion samples than bone animation samples. We spread the root motion samples
-            # out to match the interval covered by the bone animation frames (done by caller).
-            for fcurve_i, root_fcurve in enumerate(root_fcurves):  # x, y, z, -rz (from game ry)
-                data = root_motion[:, [0, fcurve_i + 1]]  # get `keyframe_t` column plus indexed dim of root motion
-                root_fcurve.keyframe_points.add(count=data.shape[0])  # row count
-                root_fcurve.keyframe_points.foreach_set("co", data.ravel().tolist())
-                for kp in root_fcurve.keyframe_points:
-                    kp.interpolation = "LINEAR"
-
-        for bone_name, bone_transform_fcurves in bone_fcurves.items():
-            basis_samples = bone_basis_samples[bone_name]
-            for fcurve_i, bone_fcurve in enumerate(bone_transform_fcurves):
-                bone_fcurve.keyframe_points.add(count=basis_samples.shape[0])  # row count
-                data = basis_samples[:, [0, fcurve_i + 1]]  # get `keyframe_t` column plus indexed dim of bone motion
-                bone_fcurve.keyframe_points.foreach_set("co", data.ravel().tolist())
-                for kp in bone_fcurve.keyframe_points:
-                    kp.interpolation = "LINEAR"
-
     # endregion
     
     # region Export
 
-    def to_interleaved_animation_hkx(
+    def to_interleaved_animation_hkx[AnimationHKXType: BaseAnimationHKX](
         self,
         operator: LoggingOperator,
         context: Context,
         armature: ArmatureObject,
         skeleton_hkx: BaseSkeletonHKX,
-        animation_hkx_class: type[BaseAnimationHKX],
-    ) -> ANIMATION_TYPING | BaseAnimationHKX:
-        """Export bone animation by sampling `pose_bone.matrix_basis` on each frame (the inverse of import).
-
-        Import writes `matrix_basis` via `game_bone_transform_to_bl_bone_matrix()` + `get_basis_matrix()`. Export
-        reconstructs armature-space bone matrices with `get_armature_matrix()` and converts them back to game space
-        with `bl_bone_matrix_to_game_trs()`.
+        animation_hkx_class: type[AnimationHKXType],
+    ) -> AnimationHKXType:
+        """Animation data is easier to export from Blender than import, as we can just read the bone transforms on each
+        frame in Armature space directly (rather than needing to compute each basis Matrix when importing).
 
         We still need this action to determine the name and start/end times for the animation.
 
@@ -715,6 +526,9 @@ class SoulstructAnimation:
 
         export_settings = context.scene.animation_export_settings
 
+        # We need the bone data type to determine if we need to account for EditBone CoB.
+        bone_data_type = get_armature_bone_data_type(armature)
+
         # TODO: Technically, animation export only needs a start/end frame range, since it samples location/bone pose
         #  on every single frame anyway and does NOT need to actually use the action FCurves!
         start_frame, end_frame = self.get_export_frame_range(context, armature, export_settings)
@@ -723,7 +537,10 @@ class SoulstructAnimation:
         root_motion_samples = []  # type: list[tuple[float, float, float, float]]
         armature_space_frames = []  # type: list[list[TRSTransform]]
 
-        has_root_motion = False
+        # Pre-detect root motion from F-curve presence rather than sampling.  This correctly
+        # preserves zero-valued root motion that would be missed by comparing consecutive samples.
+        _fcurve_paths = {fc.data_path for fc in self.channelbag.fcurves}
+        has_root_motion = bool(_fcurve_paths & {"location", "rotation_euler"})
 
         # Animation track order will match Blender bone order (which should come from FLVER).
         track_bone_mapping = list(range(len(skeleton_hkx.skeleton.bones)))
@@ -736,20 +553,49 @@ class SoulstructAnimation:
             bone.name: bone for bone in armature.pose.bones
         }
 
+        # Rest pose is static, so compute it once. FLVER rest bones never carry scale, so this is exact.
+        rest_trs_by_bone_name = get_armature_rest_trs(armature)
+        # FLVER local bone scale that the rest pose could not store, which import divided out of the pose scale.
+        flver_rest_scales = get_flver_bone_rest_scales(armature, bone_data_type)
+
+        def _get_pose_trs(bone_name: str, cache: dict[str, TRS]) -> TRS:
+            """Recursively reconstruct `bone_name`'s armature-space (translation, rotation, scale) target from its
+            pose channel values (the `matrix_basis`-equivalent written on import) via shear-free TRS composition,
+            walking up the Blender bone hierarchy as needed.
+
+            Deliberately bypasses `pose_bone.matrix`: that final matrix depends on each bone's `inherit_scale`
+            setting, and only `ALIGNED` (set by FLVER import on dynamic FLVERs) reproduces Havok's shear-free,
+            component-wise scale-propagating composition; `FULL` shears, and `NONE` drops inherited scale. Recomposing
+            from channels keeps export correct for any Armature configuration.
+            """
+            if bone_name in cache:
+                return cache[bone_name]
+            pose_bone = armature.pose.bones[bone_name]
+            basis_trs = (pose_bone.location.copy(), pose_bone.rotation_quaternion.copy(), pose_bone.scale.copy())
+            rest_trs = rest_trs_by_bone_name[bone_name]
+            bl_bone = armature.data.bones[bone_name]
+            if bl_bone.parent is not None:
+                parent_name = bl_bone.parent.name
+                parent_rest_trs = rest_trs_by_bone_name[parent_name]
+                parent_pose_trs = _get_pose_trs(parent_name, cache)
+            else:
+                parent_rest_trs = None
+                parent_pose_trs = None
+            result = get_pose_trs_from_basis(rest_trs, parent_rest_trs, basis_trs, parent_pose_trs)
+            cache[bone_name] = result
+            return result
+
         # Evaluate all curves at every frame, inclusive of `end_frame`.
         for frame_idx, frame in enumerate(range(start_frame, end_frame + 1)):
             bpy.context.scene.frame_set(frame)
             armature_space_frame = []  # type: list[TRSTransform]
+            pose_trs_cache = {}  # type: dict[str, TRS]
 
-            # We collect root motion vectors, as we're not sure if any root motion exists yet.
-            loc = armature.location
-            rot = armature.rotation_euler
-            root_motion_sample = (loc[0], loc[1], loc[2], rot[2])  # XYZ and Z rotation (soon to be game Y)
-            root_motion_samples.append(root_motion_sample)
-            if not has_root_motion:
-                if len(root_motion_samples) >= 2 and root_motion_samples[-1] != root_motion_samples[-2]:
-                    # Some actual root motion has appeared.
-                    has_root_motion = True
+            # Collect root motion sample (only when the action has root motion F-curves).
+            if has_root_motion:
+                loc = armature.location
+                rot = armature.rotation_euler
+                root_motion_samples.append((loc[0], loc[1], loc[2], rot[2]))
 
             for bone in skeleton_hkx.skeleton.bones:
                 try:
@@ -765,8 +611,19 @@ class SoulstructAnimation:
                     # raise AnimationExportError(f"Bone '{bone.name}' in HKX skeleton not found in Blender armature.")
                     armature_space_transform = TRSTransform.identity()
                 else:
-                    bl_arma_matrix = get_armature_matrix(armature, bone.name, bl_bone.matrix_basis)
-                    armature_space_transform = bl_bone_matrix_to_game_trs(bl_arma_matrix)
+                    pose_trs_bone = _get_pose_trs(bone.name, pose_trs_cache)
+                    rest_scale = flver_rest_scales.get(bone.name)
+                    if rest_scale is not None:
+                        # Restore the FLVER rest bone scale that import divided out (see `get_flver_bone_rest_scales`).
+                        pose_t, pose_r, pose_s = pose_trs_bone
+                        pose_trs_bone = (pose_t, pose_r, Vector((
+                            pose_s.x * rest_scale.x, pose_s.y * rest_scale.y, pose_s.z * rest_scale.z,
+                        )))
+                    if bone_data_type == FLVERBoneDataType.EDIT:
+                        # Undo bone CoB (at TRS level, so scale signs are preserved exactly) and convert to game space.
+                        armature_space_transform = bl_bone_trs_to_game_trs(*pose_trs_bone)
+                    else:
+                        armature_space_transform = bl_trs_to_game_trs(*pose_trs_bone)
                     if frame_idx > 0:
                         # Negate rotation quaternion if dot with last rotation is negative (first frame ignored).
                         dot = np.dot(armature_space_transform.rotation.data, last_bone_trs[bone.name].rotation.data)
@@ -803,35 +660,35 @@ class SoulstructAnimation:
         skeleton_hkx: DES_SkeletonHKX,
         animation_hkx_class: type[DES_AnimationHKX],
     ) -> DES_AnimationHKX:
-        """Convert to wavelet-compressed."""
+        """Convert to wavelet-compressed. Demon's Souls (DeS) animations only."""
         interleaved_animation = self.to_interleaved_animation_hkx(
             operator, context, armature, skeleton_hkx, animation_hkx_class
         )
         return interleaved_animation.to_wavelet_hkx()
 
-    def to_spline_animation(
+    def to_spline_animation[AnimationHKXType: BaseAnimationHKX](
         self,
         operator: LoggingOperator,
         context: Context,
         armature: ArmatureObject,
         skeleton_hkx: BaseSkeletonHKX,
-        animation_hkx_class: type[BaseAnimationHKX],
-    ) -> ANIMATION_TYPING:
+        animation_hkx_class: type[AnimationHKXType],
+    ) -> AnimationHKXType:
         interleaved_animation = self.to_interleaved_animation_hkx(
             operator, context, armature, skeleton_hkx, animation_hkx_class
         )
         return interleaved_animation.to_spline_hkx()
 
-    def to_game_compressed_animation(
+    def to_game_compressed_animation[AnimationHKXType: BaseAnimationHKX](
         self,
         operator: LoggingOperator,
         context: Context,
         game: Game,
         armature: ArmatureObject,
         skeleton_hkx: BaseSkeletonHKX,
-        animation_hkx_class: type[BaseAnimationHKX],
-        force_interleaved=False,
-    ) -> ANIMATION_TYPING:
+        animation_hkx_class: type[AnimationHKXType],
+        force_interleaved: bool = False,
+    ) -> AnimationHKXType:
         """Detect appropriate wavelet or spline compression based on game."""
 
         if force_interleaved:

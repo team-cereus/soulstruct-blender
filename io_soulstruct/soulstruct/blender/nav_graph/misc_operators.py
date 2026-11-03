@@ -22,14 +22,16 @@ from mathutils import Vector
 
 from soulstruct.base.events.enums import NavmeshFlag
 
-from soulstruct.blender.exceptions import SoulstructTypeError, MCGEdgeCreationError
-from soulstruct.blender.msb.types.darksouls1r import BlenderMSBNavmesh
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import LoggingOperator
+from ..base.operators import LoggingOperator
+from ..base.register import io_soulstruct_operator
+from ..exceptions import SoulstructTypeError, MCGEdgeCreationError
+from ..msb.types.darksouls1r import BlenderMSBNavmesh
+from ..types import *
 from .utilities import *
 from .types import *
 
 
+@io_soulstruct_operator
 class AddMCGNodeNavmeshATriangleIndex(bpy.types.Operator):
     bl_idname = "mcg_node.add_navmesh_a_triangle_index"
     bl_label = "Add Navmesh A Triangle"
@@ -44,6 +46,7 @@ class AddMCGNodeNavmeshATriangleIndex(bpy.types.Operator):
         return {'FINISHED'}
 
 
+@io_soulstruct_operator
 class RemoveMCGNodeNavmeshATriangleIndex(bpy.types.Operator):
     bl_idname = "mcg_node.remove_navmesh_a_triangle_index"
     bl_label = "Remove Navmesh A Triangle"
@@ -64,6 +67,7 @@ class RemoveMCGNodeNavmeshATriangleIndex(bpy.types.Operator):
         return {'FINISHED'}
 
 
+@io_soulstruct_operator
 class AddMCGNodeNavmeshBTriangleIndex(bpy.types.Operator):
     bl_idname = "mcg_node.add_navmesh_b_triangle_index"
     bl_label = "Add Navmesh B Triangle"
@@ -78,6 +82,7 @@ class AddMCGNodeNavmeshBTriangleIndex(bpy.types.Operator):
         return {'FINISHED'}
 
 
+@io_soulstruct_operator
 class RemoveMCGNodeNavmeshBTriangleIndex(bpy.types.Operator):
     bl_idname = "mcg_node.remove_navmesh_b_triangle_index"
     bl_label = "Remove Navmesh B Triangle"
@@ -98,6 +103,7 @@ class RemoveMCGNodeNavmeshBTriangleIndex(bpy.types.Operator):
         return {'FINISHED'}
 
 
+@io_soulstruct_operator
 class JoinMCGNodesThroughNavmesh(LoggingOperator):
     """Create an MCG edge between two nodes on a navmesh."""
     bl_idname = "io_soulstruct_scene.join_mcg_nodes"
@@ -189,6 +195,7 @@ class JoinMCGNodesThroughNavmesh(LoggingOperator):
         bl_edge.node_b = node_b
 
 
+@io_soulstruct_operator
 class SetNodeNavmeshTriangles(LoggingOperator):
     bl_idname = "io_soulstruct_scene.set_node_navmesh_triangles"
     bl_label = "Set Node Navmesh Triangles"
@@ -227,6 +234,7 @@ class SetNodeNavmeshTriangles(LoggingOperator):
                 del bm
 
 
+@io_soulstruct_operator
 class RefreshMCGNames(LoggingOperator):
     bl_idname = "scene.refresh_mcg_names"
     bl_label = "Refresh MCG Names"
@@ -303,6 +311,7 @@ class RefreshMCGNames(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class RecomputeEdgeCost(LoggingOperator):
     """Compute the expected cost of moving from the given edge's start node (lowest face index) to its end node (also
     lowest face index).
@@ -344,6 +353,11 @@ class RecomputeEdgeCost(LoggingOperator):
             if edge_navmesh is None:
                 self.warning(f"Navmesh part not set for edge '{bl_edge.name}'. Ignoring.")
                 continue  # can't update
+
+            if context.scene.nav_graph_compute_settings.require_clean_mesh:
+                if not is_mesh_clean(edge_navmesh.data):
+                    self.warning(f"Navmesh '{edge_navmesh.name}' is not clean (has duplicate vertices). Ignoring.")
+                    continue
 
             node_a = bl_edge.node_a  # type: bpy.types.Object
             node_b = bl_edge.node_b  # type: bpy.types.Object
@@ -388,6 +402,7 @@ class RecomputeEdgeCost(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class FindCheapestPath(LoggingOperator):
     """Uses A* to find the cheapest path between two selected faces on a navmesh.
 
@@ -414,6 +429,10 @@ class FindCheapestPath(LoggingOperator):
             return self.error("No active edit mesh object.")
         obj: MeshObject
 
+        if context.scene.nav_graph_compute_settings.require_clean_mesh:
+            if not is_mesh_clean(obj.data):
+                return self.error(f"Navmesh '{obj.name}' is not clean (has duplicate vertices).")
+
         bm = bmesh.from_edit_mesh(obj.data)
 
         selected_faces = [f for f in bm.faces if f.select]
@@ -425,8 +444,6 @@ class FindCheapestPath(LoggingOperator):
         start_face, end_face = selected_faces
         if start_face == active_face:
             start_face, end_face = end_face, start_face
-
-        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
 
         path, total_cost, all_passable_fallback = a_star(start_face, end_face, bm)
 
@@ -457,6 +474,7 @@ EXIT_CLUSTER = tp.Tuple[FACE_WITH_VERTS, ...]
 NODE_WITH_KEY = tp.Tuple[BlenderMCGNode, tp.Tuple[int, int]]
 
 
+@io_soulstruct_operator
 class AutoCreateMCG(LoggingOperator):
     """Create a full MCG structure from scratch but detecting node placements (adjoining 'Exit' faces) and computing
     edge costs between all pairs of nodes in each navmesh.
@@ -509,6 +527,14 @@ class AutoCreateMCG(LoggingOperator):
         map_stem = context.collection.name.split(" ")[0]
         navmesh_parts = BlenderMSBNavmesh.from_collection_objects(context.collection)
 
+        if context.scene.nav_graph_compute_settings.require_clean_mesh:
+            not_clean = []
+            for navmesh_part in navmesh_parts:
+                if not is_mesh_clean(navmesh_part.mesh):
+                    not_clean.append(navmesh_part.name)
+            if not_clean:
+                return self.error(f"Some navmeshes are not clean (have duplicate vertices): {not_clean}")
+
         navmesh_exit_clusters = []  # type: list[tuple[EXIT_CLUSTER, ...]]
 
         exit_sq_dist = context.scene.nav_graph_compute_settings.connected_exit_vertex_distance ** 2
@@ -535,6 +561,7 @@ class AutoCreateMCG(LoggingOperator):
                 navmesh_exit_clusters.append(())
                 continue
 
+            # Find all clusters of connected 'Exit' faces in each navmesh.
             exit_clusters = self.get_navmesh_exit_clusters(navmesh_part, bm, flags_layer)
             self.info(f"Found {len(exit_clusters)} exit clusters for MSB Navmesh {navmesh_part.name}.")
             navmesh_exit_clusters.append(exit_clusters)
@@ -561,7 +588,6 @@ class AutoCreateMCG(LoggingOperator):
         navmesh_part: BlenderMSBNavmesh, bm: bmesh.types.BMesh, flags_layer: bmesh.types.BMLayerItem
     ) -> tuple[EXIT_CLUSTER, ...]:
 
-        # First, find all clusters of connected 'Exit' faces in each navmesh.
         exit_clusters = []
         checked = []
 

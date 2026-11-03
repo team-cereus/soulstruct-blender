@@ -22,7 +22,7 @@ import bpy
 
 
 
-from soulstruct.blender.types import SoulstructType
+from ..types import SoulstructType
 
 from soulstruct.flver.material import Material
 

@@ -7,6 +7,7 @@ __all__ = [
     "SetSmoothCustomNormals",
     "SetVertexAlpha",
     "InvertVertexAlpha",
+    "SetVertexColorWhite",
 ]
 
 import bpy
@@ -14,9 +15,11 @@ import bmesh
 
 from soulstruct.flver import Material
 
-from soulstruct.blender.utilities import LoggingOperator
+from ....base.operators import LoggingOperator
+from ....base.register import io_soulstruct_operator
 
 
+@io_soulstruct_operator
 class SelectDisplayMaskID(LoggingOperator):
 
     bl_idname = "mesh.select_display_mask_id"
@@ -67,6 +70,7 @@ class SelectDisplayMaskID(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SelectUnweightedVertices(LoggingOperator):
 
     bl_idname = "mesh.select_unweighted_vertices"
@@ -75,7 +79,7 @@ class SelectUnweightedVertices(LoggingOperator):
 
     @classmethod
     def poll(cls, context) -> bool:
-        return context.active_object and context.active_object.type == "MESH"
+        return context.active_object is not None and context.active_object.type == "MESH"
 
     def execute(self, context):
 
@@ -100,6 +104,7 @@ class SelectUnweightedVertices(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SetSmoothCustomNormals(LoggingOperator):
 
     bl_idname = "mesh.set_smooth_custom_normals"
@@ -129,6 +134,7 @@ class SetSmoothCustomNormals(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SetVertexAlpha(LoggingOperator):
 
     bl_idname = "mesh.set_selected_vertex_alpha"
@@ -137,7 +143,11 @@ class SetVertexAlpha(LoggingOperator):
 
     @classmethod
     def poll(cls, context) -> bool:
-        return context.mode == "EDIT_MESH" and context.active_object and context.active_object.type == "MESH"
+        return (
+            context.mode == "EDIT_MESH"
+            and context.active_object is not None
+            and context.active_object.type == "MESH"
+        )
 
     def execute(self, context):
         if context.mode != "EDIT_MESH":
@@ -154,11 +164,14 @@ class SetVertexAlpha(LoggingOperator):
         if not vertex_colors:
             bm.free()
             return self.error(f"Mesh does not have a '{tool_settings.vertex_color_layer_name}' vertex color layer.")
+        active_mat_index = context.active_object.active_material_index
 
         alpha = tool_settings.vertex_alpha
         count = 0
         for face in bm.faces:
-            if tool_settings.set_selected_face_vertex_alpha_only and not face.select:
+            if tool_settings.set_selected_face_vertex_color_only and not face.select:
+                continue
+            if tool_settings.set_active_material_vertex_color_only and face.material_index != active_mat_index:
                 continue
             for loop in face.loops:
                 if loop.vert.select:
@@ -170,6 +183,7 @@ class SetVertexAlpha(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class InvertVertexAlpha(LoggingOperator):
 
     bl_idname = "mesh.invert_selected_vertex_alpha"
@@ -195,10 +209,13 @@ class InvertVertexAlpha(LoggingOperator):
         if not vertex_colors:
             bm.free()
             return self.error(f"Mesh does not have a '{tool_settings.vertex_color_layer_name}' vertex color layer.")
+        active_mat_index = context.active_object.active_material_index
 
         count = 0
         for face in bm.faces:
-            if tool_settings.set_selected_face_vertex_alpha_only and not face.select:
+            if tool_settings.set_selected_face_vertex_color_only and not face.select:
+                continue
+            if tool_settings.set_active_material_vertex_color_only and face.material_index != active_mat_index:
                 continue
             for loop in face.loops:
                 if loop.vert.select:
@@ -207,5 +224,53 @@ class InvertVertexAlpha(LoggingOperator):
                     count += 1
 
         self.info(f"Inverted vertex alpha for {count} selected vertices/loops.")
+        bmesh.update_edit_mesh(mesh)
+        return {"FINISHED"}
+
+
+@io_soulstruct_operator
+class SetVertexColorWhite(LoggingOperator):
+
+    bl_idname = "mesh.set_selected_vertex_color_white"
+    bl_label = "Set to White"
+    bl_description = "Set the RGB value of all selected vertices to white (alpha not touched)"
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return (
+            context.mode == "EDIT_MESH"
+            and context.active_object is not None
+            and context.active_object.type == "MESH"
+        )
+
+    def execute(self, context):
+        if context.mode != "EDIT_MESH":
+            return self.error("Please enter Edit Mode to use this operator.")
+
+        tool_settings = context.scene.flver_tool_settings
+
+        # noinspection PyTypeChecker
+        mesh = context.active_object.data  # type: bpy.types.Mesh
+
+        bm = bmesh.from_edit_mesh(mesh)
+
+        vertex_colors = bm.loops.layers.color.get(tool_settings.vertex_color_layer_name)
+        if not vertex_colors:
+            bm.free()
+            return self.error(f"Mesh does not have a '{tool_settings.vertex_color_layer_name}' vertex color layer.")
+        active_mat_index = context.active_object.active_material_index
+
+        count = 0
+        for face in bm.faces:
+            if tool_settings.set_selected_face_vertex_color_only and not face.select:
+                continue
+            if tool_settings.set_active_material_vertex_color_only and face.material_index != active_mat_index:
+                continue
+            for loop in face.loops:
+                if loop.vert.select:
+                    loop[vertex_colors][0:3] = [1.0, 1.0, 1.0]
+                    count += 1
+
+        self.info(f"Set vertex color to white for {count} selected vertices/loops.")
         bmesh.update_edit_mesh(mesh)
         return {"FINISHED"}

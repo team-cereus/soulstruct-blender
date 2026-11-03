@@ -9,7 +9,19 @@ from unittest.mock import MagicMock
 
 def _load_equipment_assembly():
     stan_tools_dir = Path(__file__).resolve().parents[1] / "stan_tools"
-    pkg_name = "stan_tools_equipment_assembly_test_pkg"
+    # Two levels, so the add-on's relative `from ..general.properties import ...` resolves (to a stand-in).
+    root_name = "stan_tools_equipment_assembly_test_root"
+    pkg_name = f"{root_name}.stan_tools"
+
+    root = types.ModuleType(root_name)
+    root.__path__ = []
+    sys.modules[root_name] = root
+    general = types.ModuleType(f"{root_name}.general")
+    general.__path__ = []
+    sys.modules[f"{root_name}.general"] = general
+    properties = types.ModuleType(f"{root_name}.general.properties")
+    properties.SoulstructSettings = MagicMock()
+    sys.modules[f"{root_name}.general.properties"] = properties
 
     pkg = types.ModuleType(pkg_name)
     pkg.__path__ = [str(stan_tools_dir)]

@@ -23,18 +23,18 @@ from soulstruct.games import *
 from soulstruct.utilities.text import natural_keys
 from soulstruct.havok.fromsoft.shared import HKXBHD, BothResHKXBHD
 
-from soulstruct.blender.general.game_config import BLENDER_GAME_CONFIG
-from soulstruct.blender.collision.types import BlenderMapCollision
-from soulstruct.blender.navmesh.nvm.types import BlenderNVM
-from soulstruct.blender.types import SoulstructType
-from soulstruct.blender.utilities.operators import LoggingOperator, LoggingExportOperator
-
+from ..base.operators import LoggingOperator, LoggingExportOperator
+from ..base.register import io_soulstruct_operator
+from ..collision.types import BlenderMapCollision
+from ..general.game_config import BLENDER_GAME_CONFIG
+from ..navmesh.nvm.types import BlenderNVM
+from ..types import SoulstructType
 from .operator_config import *
 from .properties import BlenderMSBPartSubtype
 from .utilities import MSB_COLLECTION_RE
 
 if tp.TYPE_CHECKING:
-    from soulstruct.blender.msb.types.base import *
+    from ..msb.types.base import *
     MSB_TYPING = tp.Union[MSB_PTDE, MSB_DSR, MSB_DES]
 
 
@@ -123,9 +123,9 @@ def _export_msb(
         SoulstructType.MSB_EVENT: [],
     }
     for bl_entry_classes, bl_entry_objs, soulstruct_type in (
-        (BLENDER_MSB_REGION_CLASSES[settings.game], bl_region_objs, SoulstructType.MSB_REGION),
-        (BLENDER_MSB_PART_CLASSES[settings.game], bl_part_objs, SoulstructType.MSB_PART),
-        (BLENDER_MSB_EVENT_CLASSES[settings.game], bl_event_objs, SoulstructType.MSB_EVENT),
+        (BLENDER_MSB_REGION_CLASSES[settings.game_type], bl_region_objs, SoulstructType.MSB_REGION),
+        (BLENDER_MSB_PART_CLASSES[settings.game_type], bl_part_objs, SoulstructType.MSB_PART),
+        (BLENDER_MSB_EVENT_CLASSES[settings.game_type], bl_event_objs, SoulstructType.MSB_EVENT),
     ):
         bl_and_msb_entries = all_bl_and_msb_entries[soulstruct_type]
         for bl_entry_obj in bl_entry_objs:
@@ -159,6 +159,7 @@ def _export_msb(
     return msb, bl_part_objs
 
 
+@io_soulstruct_operator
 class ExportAnyMSB(LoggingExportOperator):
 
     bl_idname = "export_scene.any_msb"
@@ -171,7 +172,7 @@ class ExportAnyMSB(LoggingExportOperator):
     @classmethod
     def poll(cls, context):
         settings = cls.settings(context)
-        if not BLENDER_GAME_CONFIG[settings.game].msb_class:
+        if not BLENDER_GAME_CONFIG[settings.game_type].msb_class:
             return False  # unsupported
         if not context.collection:
             return False
@@ -237,6 +238,7 @@ class ExportAnyMSB(LoggingExportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportMapMSB(LoggingOperator):
 
     bl_idname = "export_scene.map_msb"
@@ -249,7 +251,7 @@ class ExportMapMSB(LoggingOperator):
     @classmethod
     def poll(cls, context) -> bool:
         settings = cls.settings(context)
-        if not BLENDER_GAME_CONFIG[settings.game].msb_class:
+        if not BLENDER_GAME_CONFIG[settings.game_type].msb_class:
             return False  # unsupported
         if not context.collection:
             return False
@@ -316,7 +318,7 @@ class ExportMapMSB(LoggingOperator):
             self.info(f"Exported NVMDUMP file next to NVMBND: {relative_nvmdump_path.name}")
 
         if export_settings.is_bool_prop_active_and_true(context, "export_navmesh_models"):
-            bl_navmesh_class = BLENDER_MSB_PART_CLASSES[settings.game][BlenderMSBPartSubtype.Navmesh]
+            bl_navmesh_class = BLENDER_MSB_PART_CLASSES[settings.game_type][BlenderMSBPartSubtype.Navmesh]
             bl_navmesh_parts = [
                 bl_navmesh_class(obj) for obj in bl_part_objs
                 if obj.MSB_PART.entry_subtype == BlenderMSBPartSubtype.Navmesh
@@ -328,7 +330,7 @@ class ExportMapMSB(LoggingOperator):
             if not settings.game_config.supports_collision_model:
                 self.warning(f"Collision model export not supported for game '{settings.game}'.")
             else:
-                bl_collision_class = BLENDER_MSB_PART_CLASSES[settings.game][BlenderMSBPartSubtype.Collision]
+                bl_collision_class = BLENDER_MSB_PART_CLASSES[settings.game_type][BlenderMSBPartSubtype.Collision]
                 bl_collision_parts = [
                     bl_collision_class(obj) for obj in bl_part_objs
                     if obj.MSB_PART.entry_subtype == BlenderMSBPartSubtype.Collision
@@ -392,11 +394,11 @@ class ExportMapMSB(LoggingOperator):
         settings = context.scene.soulstruct_settings
 
         relative_nvmbnd_path = Path(f"map/{map_stem}/{map_stem}.nvmbnd")
-        if settings.is_game(DEMONS_SOULS):
+        if settings.is_game(GameType.DemonsSouls):
             nvmbnd = NVMBND_DES(map_stem=map_stem)
-        elif settings.is_game(DARK_SOULS_PTDE):
+        elif settings.is_game(GameType.DarkSoulsPTDE):
             nvmbnd = NVMBND_PTDE(map_stem=map_stem)
-        elif settings.is_game(DARK_SOULS_DSR):
+        elif settings.is_game(GameType.DarkSoulsDSR):
             nvmbnd = NVMBND_DSR(map_stem=map_stem)
         else:
             return self.error(f"NVMBND export not supported for game '{settings.game}'.")

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import bpy
 
-from soulstruct.blender.general.properties import SoulstructSettings
+from ..general.properties import SoulstructSettings
 from soulstruct.games import NIGHTREIGN
 
 from .debug_log import stan_debug, stan_info, stan_warning

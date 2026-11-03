@@ -22,13 +22,15 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.containers import Binder, BinderEntry
 from soulstruct.base.maps.navmesh.nvm import NVM
+from soulstruct.containers import Binder, BinderEntry
 
-from soulstruct.blender.exceptions import NVMImportError
-from soulstruct.blender.utilities import *
-from soulstruct.blender.navmesh.nvm.types import *
-from soulstruct.blender.navmesh.nvm.utilities import *
+from ...base.operators import *
+from ...base.register import io_soulstruct_operator
+from ...exceptions import NVMImportError
+from ...utilities import *
+from .types import *
+from .utilities import *
 
 
 class NVMImportChoiceInfo(tp.NamedTuple):
@@ -37,12 +39,7 @@ class NVMImportChoiceInfo(tp.NamedTuple):
     entries: list[BinderEntry]  # entries from which user must choose
 
 
-class BaseImportNVM(LoggingImportOperator):
-
-    # Type hints for `LoggingOperator`.
-    error: tp.Callable[[str], set[str]]
-    warning: tp.Callable[[str], set[str]]
-    info: tp.Callable[[str], set[str]]
+class _BaseImportNVM(LoggingImportOperator):
 
     navmesh_model_id: int
     import_all_from_binder: bool
@@ -56,7 +53,7 @@ class BaseImportNVM(LoggingImportOperator):
         Returns a list of `(model_name, NVM)` tuples and/or `NVMImportChoiceInfo` objects, depending on whether the
         Binder contains multiple entries that the user may need to choose from.
         """
-        nvm_entries = binder.find_entries_matching_name(ANY_NVM_NAME_RE)
+        nvm_entries = binder.find_entries_by_name_regex(ANY_NVM_NAME_RE)
         if not nvm_entries:
             raise NVMImportError(f"Cannot find any '.nvm{{.dcx}}' files in binder {file_path}.")
 
@@ -80,7 +77,7 @@ class BaseImportNVM(LoggingImportOperator):
                         self.warning(f"Error occurred while reading NVM Binder entry '{entry.name}': {ex}")
                     else:
                         nvm.path = Path(entry.name)  # also done in `GameFile`, but explicitly needed below
-                        new_import_infos.append((entry.minimal_stem, nvm))
+                        new_import_infos.append((entry.stem, nvm))
                 return new_import_infos
 
             # Queue up all matching Binder entries instead of loaded NVM instances; user will choose entry in pop-up.
@@ -93,7 +90,7 @@ class BaseImportNVM(LoggingImportOperator):
             self.warning(f"Error occurred while reading NVM Binder entry '{nvm_entries[0].name}': {ex}")
             return []
 
-        return [(nvm_entries[0].minimal_stem, nvm)]
+        return [(nvm_entries[0].stem, nvm)]
 
     def check_nvm_entry_model_id(self, nvm_entry: BinderEntry) -> bool:
         """Checks if the given NVM Binder entry matches the given navmesh model ID."""
@@ -104,7 +101,8 @@ class BaseImportNVM(LoggingImportOperator):
         return entry_model_id == self.navmesh_model_id
 
 
-class ImportAnyNVM(BaseImportNVM):
+@io_soulstruct_operator
+class ImportAnyNVM(_BaseImportNVM):
     bl_idname = "import_scene.nvm"
     bl_label = "Import NVM"
     bl_description = "Import a NVM navmesh file. Can import from BNDs and supports DCX-compressed files"
@@ -211,6 +209,7 @@ def get_binder_entry_choices(self, context):
     return ImportNVMWithBinderChoice.enum_options
 
 
+@io_soulstruct_operator
 class ImportNVMWithBinderChoice(LoggingOperator):
     """Presents user with a choice of enums from `enum_choices` class variable (set prior).
 
@@ -245,7 +244,7 @@ class ImportNVMWithBinderChoice(LoggingOperator):
         entry = self.nvm_entries[choice]
 
         nvm = entry.to_binary_file(NVM)
-        model_name = entry.minimal_stem
+        model_name = entry.stem
         nvm_model_name = entry.name.split(".")[0]
 
         try:
@@ -285,6 +284,7 @@ class ImportNVMWithBinderChoice(LoggingOperator):
         bpy.ops.wm.nvm_binder_choice_operator("INVOKE_DEFAULT")
 
 
+@io_soulstruct_operator
 class ImportMapNVM(BinderEntrySelectOperator):
     """Import a NVM from the current selected value of listed game map NVMs."""
     bl_idname = "import_scene.selected_map_nvm"
@@ -335,7 +335,7 @@ class ImportMapNVM(BinderEntrySelectOperator):
         map_stem = settings.get_latest_map_stem_version()  # always uses latest in DS1
 
         nvm = entry.to_binary_file(NVM)
-        model_name = entry.minimal_stem
+        model_name = entry.stem
 
         collection = find_or_create_collection(
             context.scene.collection,

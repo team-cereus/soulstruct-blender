@@ -6,9 +6,11 @@ __all__ = [
 ]
 
 import bpy
-from soulstruct.blender.msb.properties.parts import BlenderMSBPartSubtype
-from soulstruct.blender.types import MeshObject, SoulstructType
-from soulstruct.blender.utilities.operators import LoggingOperator
+
+from ...base.operators import LoggingOperator
+from ...base.register import io_soulstruct_operator
+from ...msb.properties.parts import BlenderMSBPartSubtype
+from ...types import MeshObject, SoulstructType
 
 from .nodes import *
 
@@ -27,6 +29,7 @@ def _get_selected_msb_geometry_objects(context: bpy.types.Context) -> list[MeshO
     return objs
 
 
+@io_soulstruct_operator
 class AddDebugNodeGroupToMaterials(LoggingOperator):
     bl_idname = "soulstruct.add_debug_nodes_materials"
     bl_label = "Add Material Debug Nodes"
@@ -60,6 +63,7 @@ class AddDebugNodeGroupToMaterials(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class RemoveDebugNodeGroupFromMaterials(LoggingOperator):
     bl_idname = "soulstruct.remove_debug_node_group"
     bl_label = "Remove Material Debug Nodes"

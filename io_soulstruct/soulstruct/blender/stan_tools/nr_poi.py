@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from soulstruct.blender.navmesh.nvmhkt.utilities import ER_GRID_ORIGIN
+from ..navmesh.nvmhkt.utilities import ER_GRID_ORIGIN
 from soulstruct.utilities.maths import Vector3
 
 from .regulation_bin import load_param_rows

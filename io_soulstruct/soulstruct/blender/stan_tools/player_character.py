@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import bpy
 
-from soulstruct.blender.utilities import LoggingOperator, find_or_create_collection
+from ..base.operators import LoggingOperator
+from ..utilities import find_or_create_collection
 
 from .debug_log import stan_debug, stan_info, stan_warning
 from .equipment_assembly import assemble_er_preview_after_import, find_c0000_armature
@@ -14,6 +15,7 @@ from .weapon_preview_body import (
     import_ds1_preview_body,
     import_er_preview_body,
 )
+from ..base.register import io_soulstruct_operator
 
 __all__ = [
     "PLAYER_CHARACTER_STEM",
@@ -134,6 +136,7 @@ def clear_player_character(context: bpy.types.Context) -> int:
     return removed
 
 
+@io_soulstruct_operator
 class StanLoadPlayerCharacter(LoggingOperator):
     """Load c0000 skeleton + LG/BD/AM/HD armor glued like DSAS."""
 
@@ -152,7 +155,7 @@ class StanLoadPlayerCharacter(LoggingOperator):
 
     @classmethod
     def poll(cls, context) -> bool:
-        from soulstruct.blender.general.properties import SoulstructSettings
+        from ..general.properties import SoulstructSettings
 
         settings = SoulstructSettings.from_context(context)
         return settings.has_import_dir_path("chr") and settings.has_import_dir_path("parts")

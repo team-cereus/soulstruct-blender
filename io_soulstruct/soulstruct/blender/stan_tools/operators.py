@@ -14,8 +14,8 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.blender.general.properties import SoulstructSettings
-from soulstruct.blender.utilities import LoggingOperator
+from ..general.properties import SoulstructSettings
+from ..base.operators import LoggingOperator
 from soulstruct.games import NIGHTREIGN
 
 from .regulation_bin import auto_set_regulation_bin_dir
@@ -23,8 +23,10 @@ from .steam_paths import detect_game_root
 from .mesh_mask_visibility import show_all_character_meshes
 from .npc_param import find_character_armature, _resolve_npc_param_xml_path
 from .scene_lighting import apply_scene_lighting, remove_scene_lighting
+from ..base.register import io_soulstruct_operator
 
 
+@io_soulstruct_operator
 class AutoDetectGameDirectory(LoggingOperator):
     """Find the game install via Steam and set Game Root (+ default Mod Folder)."""
 
@@ -48,14 +50,14 @@ class AutoDetectGameDirectory(LoggingOperator):
             )
 
         prop_name = settings.get_game_root_prop_name()
-        setattr(settings, prop_name, str(root))
+        setattr(settings.game_settings, prop_name, str(root))
         settings.auto_set_game()
         self.info(f"Set game root: {root}")
 
         mod_prop = settings.get_mod_root_prop_name()
-        if not getattr(settings, mod_prop, ""):
+        if not getattr(settings.game_settings, mod_prop, ""):
             mod_path = root / "mod"
-            setattr(settings, mod_prop, str(mod_path))
+            setattr(settings.game_settings, mod_prop, str(mod_path))
             self.info(f"Set mod folder: {mod_path}")
 
         if settings.is_game(NIGHTREIGN) and not settings.nightreign_unpack_staging_str:
@@ -74,6 +76,7 @@ class AutoDetectGameDirectory(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class StanRefreshC0000SubAnibndList(LoggingOperator):
     """Reload c0000 sub-ANIBND choices from c0000.anibnd."""
 
@@ -91,6 +94,7 @@ class StanRefreshC0000SubAnibndList(LoggingOperator):
         )
 
 
+@io_soulstruct_operator
 class StanRefreshNpcParamList(LoggingOperator):
     """Reload NpcParam rows for the active character from NpcParam.param.xml."""
 
@@ -112,6 +116,7 @@ class StanRefreshNpcParamList(LoggingOperator):
         return self.warning("Could not find NPC Param rows. Import a character (c####) first.")
 
 
+@io_soulstruct_operator
 class StanApplyNpcParamDrawMask(LoggingOperator):
     """Apply the selected NpcParam draw mask to character mesh visibility."""
 
@@ -132,6 +137,7 @@ class StanApplyNpcParamDrawMask(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class StanShowAllCharacterMeshes(LoggingOperator):
     """Show all mesh children of the active character (ignore draw masks)."""
 
@@ -151,6 +157,7 @@ class StanShowAllCharacterMeshes(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class StanApplySceneLighting(LoggingOperator):
     """Add or update 3-point viewport lighting and world sky/HDRI."""
 
@@ -167,6 +174,7 @@ class StanApplySceneLighting(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class StanRemoveSceneLighting(LoggingOperator):
     """Remove StanTools viewport lighting and reset world to a dark studio."""
 

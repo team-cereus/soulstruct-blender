@@ -9,20 +9,28 @@ __all__ = [
     "BlenderFLVER",
 ]
 
+import time
+import traceback
 import typing as tp
+from pathlib import Path
 
 import bpy
 
-from soulstruct.flver import *
+from soulstruct.flver import FLVER
 from soulstruct.utilities.text import natural_keys
 
-from soulstruct.blender.base import BaseBlenderSoulstructObject, add_auto_type_props
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.flver.image.types import DDSTextureCollection
-from soulstruct.blender.flver.material.types import BlenderFLVERMaterial
-from soulstruct.blender.flver.models.properties import *
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+import pyrelink.core as pyre
+import pyrelink.flver as pyre_flver
+
+from .....base.operators import *
+from .....base.soulstruct_object import BaseBlenderSoulstructObject, add_auto_type_props
+from .....exceptions import *
+from .....flver.image.image_import_manager import ImageImportManager
+from .....flver.image.types import DDSTextureCollection
+from .....flver.material.types import BlenderFLVERMaterial
+from .....flver.models.properties import *
+from .....types import *
+from .....utilities import *
 from ..bl_flver_dummy import BlenderFLVERDummy
 from ..enums import FLVERModelType, FLVERBoneDataType
 
@@ -32,9 +40,6 @@ from ._deep_rename import deep_rename
 from ._duplicate import *
 from ._export import create_flver_from_bl_flver
 from ._import import create_bl_flver_from_flver
-
-if tp.TYPE_CHECKING:
-    from soulstruct.blender.flver.image.image_import_manager import ImageImportManager
 
 
 class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
@@ -125,7 +130,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         return None
 
     @classmethod
-    def from_armature_or_mesh(cls, obj: bpy.types.Object) -> tp.Self:
+    def from_armature_or_mesh(cls, obj: bpy.types.Object | None) -> tp.Self:
         """FLVER models can be parsed from a Mesh obj or its optional Armature parent."""
         if not obj:
             raise SoulstructTypeError("No Object given.")
@@ -147,16 +152,16 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         self.deep_rename(new_name)
 
     def get_dummies(self, operator: LoggingOperator | None = None) -> list[BlenderFLVERDummy]:
-        """Find all FLVER Dummy (empty children of root object with expected name).
+        """Find all FLVER Dummy (empty children of Armature parent, i.e. siblings of Mesh, with expected name).
 
         If `operator` is provided, warnings will be logged for any Empty children that do not match the expected name
         pattern.
         """
-        if not self.armature:
-            return []
+        if not (armature := self.armature):
+            return []  # Dummies require a FLVER Armature parent
 
         dummies = []
-        for child in self.armature.children:
+        for child in armature.children:
             if child.type != "EMPTY":
                 continue
             if BlenderFLVERDummy.DUMMY_NAME_RE.match(child.name):
@@ -166,8 +171,10 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         return sorted(dummies, key=lambda d: natural_keys(d.name))
 
     def get_materials(self) -> list[BlenderFLVERMaterial]:
-        """Get all Mesh materials as `BlenderFLVERMaterial` objects."""
-        return [BlenderFLVERMaterial(mat) for mat in self.mesh.data.materials]
+        """Get all valid Mesh materials as `BlenderFLVERMaterial` objects."""
+        return [
+            BlenderFLVERMaterial(mat) for mat in self.mesh.data.materials if mat is not None
+        ]
 
     def deep_rename(self, new_name: str, old_name=""):
         deep_rename(self, new_name, old_name)
@@ -203,9 +210,9 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         Does not rename anything.
         """
         new_armature_obj = duplicate_armature(self, context, child_mesh_obj, as_data_instance)
-        if copy_pose:
+        if copy_pose and (armature := self.armature):
             context.view_layer.update()  # SLOW
-            copy_armature_pose(self.armature, new_armature_obj)
+            copy_armature_pose(armature, new_armature_obj)
         return new_armature_obj
 
     def duplicate_dummies(self) -> list[bpy.types.Object]:
@@ -215,7 +222,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
     def duplicate(
         self,
         context: bpy.types.Context,
-        collections: tp.Sequence[bpy.types.Collection] = None,
+        collections: tp.Sequence[bpy.types.Collection] | None = None,
         make_materials_single_user=True,
         copy_pose=False,
     ) -> BlenderFLVER:
@@ -226,9 +233,10 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         """
         return duplicate(self, context, collections, make_materials_single_user, copy_pose)
 
-    def duplicate_edit_mode(
+    def to_new_bl_flver_edit_mode(
         self,
         context: bpy.types.Context,
+        duplicate_selected_geometry: bool = True,
         make_materials_single_user=True,
         copy_pose=False,
     ) -> BlenderFLVER:
@@ -236,13 +244,19 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
 
         As with `duplicate()`, nothing is renamed; the caller can do that as desired.
         """
-        return duplicate_edit_mode(self, context, make_materials_single_user, copy_pose)
+        return to_new_bl_flver_edit_mode(
+            self,
+            context,
+            duplicate_selected_geometry=duplicate_selected_geometry,
+            make_materials_single_user=make_materials_single_user,
+            copy_pose=copy_pose
+        )
 
     def sync_msb_part_armatures(self, context: bpy.types.Context) -> list[MeshObject]:
         """Find all MSB Part instances that use this FLVER as their model, and sync their Armatures to this FLVER's
         Armature. This may involve creating a new Armature for the Part."""
 
-        if not self.armature:
+        if not (armature := self.armature):
             return []  # nothing to sync if no Armature (we don't delete out-of-sync MSB Part armatures)
         bl_msb_part_users = self.find_msb_part_users()
         if not bl_msb_part_users:
@@ -253,7 +267,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         for bl_msb_part in bl_msb_part_users:
             if bl_msb_part.parent and bl_msb_part.parent.type == "ARMATURE":
                 bl_msb_part_arma = bl_msb_part.parent
-                bl_msb_part_arma.data = self.armature.data  # assign new Armature data to existing Armature object
+                bl_msb_part_arma.data = armature.data  # assign new Armature data to existing Armature object
             else:
                 if self.bone_data_type != FLVERBoneDataType.CUSTOM:
                     # TODO: Baked policy: only create new Armatures for CUSTOM bone data (e.g. static Map Piece pose).
@@ -274,7 +288,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
             # Update view layer ONCE to capture any newly-created armatures.
             context.view_layer.update()  # SLOW
         for bl_msb_part_arma in bl_msb_part_armatures:
-            copy_armature_pose(self.armature, bl_msb_part_arma)
+            copy_armature_pose(armature, bl_msb_part_arma)
         return bl_msb_part_users
 
     def find_msb_part_users(self) -> list[MeshObject]:
@@ -289,7 +303,7 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
     def create_default_armature_parent(
         context: bpy.types.Context,
         model_name: str,
-        mesh_child_obj: MeshObject = None,
+        mesh_child_obj: MeshObject | None = None,
     ) -> ArmatureObject:
         """Create a default Blender Armature for `mesh_child_obj` with a single default, origin, eponymous bone.
 
@@ -320,21 +334,21 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         context: bpy.types.Context,
         soulstruct_obj: FLVER,
         name: str,
-        collection: bpy.types.Collection = None,
+        collection: bpy.types.Collection | None = None,
         *,
         image_import_manager: ImageImportManager | None = None,
-        existing_merged_mesh: MergedMesh = None,
-        existing_bl_materials: tp.Sequence[BlenderFLVERMaterial] = None,
-        existing_mesh_bl_material_indices: tp.Sequence[int] = None,
+        texture_finders: tp.Sequence[pyre_flver.TextureFinder] = (),
+        existing_bl_materials: tp.Sequence[BlenderFLVERMaterial] | None = None,
+        existing_mesh_bl_material_indices: tp.Sequence[int] | None = None,
     ) -> BlenderFLVER:
         """Read a FLVER into a managed Blender Armature/Mesh.
 
         If the FLVER has only a single bone with all-default properties for this game, and no Dummies, no Armature will
         be created and the Mesh will be the root object. This is useful for simple static models like map pieces.
 
-        `existing_merged_mesh` can be created in advance (e.g. in parallel) and passed in directly for the corresponding
-        `FLVER`. If so, `existing_bl_materials` and `existing_mesh_bl_material_indices` must also be given, and should
-        have been created in advance to get the `MergedMesh` arguments anyway.
+        Merged Mesh may be cached in advance (e.g. in parallel) on `FLVER` instance. If so, `existing_bl_materials` and
+        `existing_mesh_bl_material_indices` must also be given, and should have been created in advance to get the
+        `MergedMesh` arguments anyway.
 
         NOTE: FLVER (for DS1 at least) supports a maximum of 38 bones per sub-mesh. When this maximum is reached, a new
         FLVER sub-mesh is created. All of these sub-meshes are unified in Blender under the same material slot, and will
@@ -366,10 +380,275 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
             name=name,
             collection=collection,
             image_import_manager=image_import_manager,
-            existing_merged_mesh=existing_merged_mesh,
+            texture_finders=texture_finders,
             existing_bl_materials=existing_bl_materials,
             existing_mesh_bl_material_indices=existing_mesh_bl_material_indices,
         )
+
+    @classmethod
+    def new_batch_from_soulstruct_objs(
+        cls,
+        operator: LoggingOperator,
+        context: bpy.types.Context,
+        flver_path_sources: dict[str, Path] | None = None,
+        flver_binder_sources: dict[str, tuple[pyre.BinderEntry, pyre.Binder]] | None = None,
+        texture_finder_callback: tp.Callable[[pyre_flver.TextureFinder, pyre_flver.FLVER, pyre.BinderEntry | Path, pyre.Binder | None], None] | None = None,
+        flver_model_category: str = "",
+        collection: bpy.types.Collection | None = None,
+    ) -> dict[str, BlenderFLVER]:
+        """Primary multi-FLVER importer with efficient Blender material construction and texture retrieval.
+
+        FLVERs should already be parsed into dictionaries of Path sources and (BinderEntry, Binder) sources.
+
+        Returns a dictionary of FLVERs keyed by model stem. FLVERs that have import errors are logged and ignored.
+        """
+
+        # Format category spacing for easier message formatting (one trailing space).
+        flver_model_category = f"{flver_model_category.rstrip()} " if flver_model_category else ""
+
+        settings = context.scene.soulstruct_settings
+        flver_import_settings = context.scene.flver_import_settings
+
+        flver_path_sources = flver_path_sources or {}
+        flver_binder_sources = flver_binder_sources or {}
+        flvers = {}  # type: dict[str, FLVER | pyre_flver.FLVER]
+
+        operator.info(
+            f"Importing {len(flver_binder_sources) + len(flver_path_sources)} "
+            f"{flver_model_category} FLVERs in parallel.",
+            report=True,
+        )
+
+        p = time.perf_counter()
+
+        # STEPS: FLVER import + Texture registration + Material creation + BlenderFLVER creation, per FLVER
+        steps = 5 * (len(flver_path_sources) + len(flver_binder_sources))
+        if context.window_manager:
+            context.window_manager.progress_begin(0, steps)
+
+        def progress(s: int) -> None:
+            if context.window_manager:
+                context.window_manager.progress_update(s)
+
+        if settings.use_pyrelink_flver:
+            # Use C++ acceleration.
+            flvers_from_paths = pyre_flver.FLVER.from_paths_parallel(list(flver_path_sources.values()))
+            flvers_from_binders = pyre_flver.FLVER.from_bytes_parallel(
+                [entry.get_uncompressed_data() for entry, _ in flver_binder_sources.values()]
+            )
+            for flver, (entry, _) in zip(flvers_from_binders, flver_binder_sources.values(), strict=True):
+                # Set FLVER path manually to BinderEntry name (not full path).
+                flver.path = entry.name
+        else:
+            # Use pure Python FLVER.
+            flvers_from_paths = FLVER.from_paths_parallel(list(flver_path_sources.values()))
+            flvers_from_binders = FLVER.from_binder_entries_parallel(
+                [entry for entry, _ in flver_binder_sources.values()]
+            )
+
+        progress(steps // 5)
+
+        for (name, _), flver_from_path in zip(flver_path_sources.items(), flvers_from_paths, strict=True):
+            if flver_from_path:
+                flvers[name] = flver_from_path
+        for (name, _), flver_from_binder in zip(flver_binder_sources.items(), flvers_from_binders, strict=True):
+            if name in flvers:
+                # FLVER loaded from both Path and BinderEntry.
+                operator.warning(
+                    f"FLVER '{name}' loaded from both Path and BinderEntry sources. Using Path source and ignoring "
+                    f"BinderEntry source."
+                )
+            elif flver_from_binder:
+                flvers[name] = flver_from_binder
+
+        operator.info(
+            f"Imported {len(flvers)} {flver_model_category} FLVERs in {time.perf_counter() - p:.2f} seconds."
+        )
+        p = time.perf_counter()
+
+        if flver_import_settings.import_textures:
+
+            step = steps // 5
+            if settings.pyrelink_game_type == pyre.GameType.Bloodborne:
+                # TODO: pyrelink TextureFinder can deswizzle PS4 textures now - upgrade.
+                image_import_manager = ImageImportManager(operator, context)
+                texture_finders = []
+
+                # Find textures for all loaded FLVERs.
+                for model_name, flver in flvers.items():
+                    _, source_binder = flver_binder_sources.get(model_name, (None, None))
+                    image_import_manager.find_flver_textures(
+                        source_binder.path if source_binder else flver.path,
+                        source_binder,
+                    )
+                    progress(step)
+                    step += 1
+            else:
+                image_import_manager = None
+                texture_finders = settings.create_texture_finders()
+
+                # Find textures for all loaded FLVERs.
+                reg_p = time.perf_counter()
+                for model_name, flver in flvers.items():
+                    _, source_binder = flver_binder_sources.get(model_name, (None, None))
+                    for finder in texture_finders:
+                        finder.register_flver_sources(
+                            str(source_binder.path if source_binder else flver.path),
+                            source_binder,
+                        )
+                    if texture_finder_callback:
+                        # Logical assertion: FLVER source must be Path or BinderEntry in one of these.
+                        flver_source = flver_path_sources[model_name] or flver_binder_sources[model_name][0]
+                        for finder in texture_finders:
+                            texture_finder_callback(
+                                finder,
+                                flver,
+                                flver_source,
+                                flver_binder_sources.get(model_name, (None, None))[1],
+                            )
+                    progress(step)
+                    step += 1
+                operator.info(
+                    f"Registered FLVER texture sources for {len(flvers)} in {time.perf_counter() - reg_p:.2f} s."
+                )
+        else:
+            image_import_manager = None
+            texture_finders = []
+            progress(2 * steps // 5)
+
+        # Brief non-parallel excursion: create Blender materials and `MergedMesh` arguments for each `FLVER`.
+        flver_bl_materials = {}  # type: dict[str, tuple[BlenderFLVERMaterial, ...]]
+        flver_mesh_bl_material_indices = {}  # type: dict[str, tuple[int, ...]]
+        flver_names_to_merge = []
+
+        # Arguments for parallel MergedMesh cache:
+        flvers_to_merge = []
+        flvers_mesh_material_indices = []
+        flvers_bl_material_uv_layer_names = []
+
+        bl_materials_by_matdef_name = {}  # can re-use cache across all FLVERs!
+        step = 2 * steps // 5
+        for model_name, flver in tuple(flvers.items()):
+            if not flver.meshes:
+                # FLVER has no meshes. No materials or merging.
+                continue
+
+            try:
+                mat_p = time.perf_counter()
+                bl_materials, mesh_bl_material_indices, bl_material_uv_layer_names = BlenderFLVER.create_materials(
+                    operator,
+                    context,
+                    flver,
+                    model_name,
+                    material_blend_mode=flver_import_settings.material_blend_mode,
+                    image_import_manager=image_import_manager,
+                    texture_finders=texture_finders,
+                    bl_materials_by_matdef_name=bl_materials_by_matdef_name,
+                )
+                progress(step)
+                step += 1
+                operator.time_info(mat_p, f"Created Blender materials for FLVER {model_name}")
+            except Exception as ex:
+                operator.error(f"(Batch) Cannot import FLVER: {flver.path_name}. Material creation error: {ex}")
+                flvers.pop(model_name)  # drop failed FLVER
+                continue
+
+            flver_bl_materials[model_name] = bl_materials
+            flver_mesh_bl_material_indices[model_name] = mesh_bl_material_indices
+
+            flver_names_to_merge.append(model_name)
+            flvers_to_merge.append(flver)
+            flvers_mesh_material_indices.append(mesh_bl_material_indices)
+            flvers_bl_material_uv_layer_names.append(bl_material_uv_layer_names)
+
+        operator.info(
+            f"Created materials for {len(flvers)} {flver_model_category}FLVERs in {time.perf_counter() - p:.2f} "
+            f"seconds."
+        )
+        p = time.perf_counter()
+
+        # Merge meshes in parallel. Empty meshes will be `None`.
+        # API is the same for Python and C++ FLVER.
+        if settings.use_pyrelink_flver:
+            merge_successes = pyre_flver.FLVER.update_cached_merged_meshes_parallel(
+                flvers_to_merge,
+                flvers_mesh_material_indices,
+                flvers_bl_material_uv_layer_names,
+                [flver_import_settings.merge_mesh_vertices] * len(flvers_to_merge),  # type: list[bool]
+            )
+        else:
+            merge_successes = FLVER.update_cached_merged_meshes_parallel(
+                flvers_to_merge,
+                flvers_mesh_material_indices,
+                flvers_bl_material_uv_layer_names,
+                [flver_import_settings.merge_mesh_vertices] * len(flvers_to_merge),  # type: list[bool]
+            )
+        step = 4 * steps // 5
+        progress(step)
+
+        operator.info(
+            f"Merged {len(flvers)} {flver_model_category}FLVERs in {time.perf_counter() - p:.2f} s (C++)."
+        )
+        flver_merge_successes = {
+            model_name: success
+            for model_name, success in zip(flver_names_to_merge, merge_successes, strict=True)
+        }
+
+        p = time.perf_counter()
+
+        if collection is None:
+            collection = find_or_create_collection(
+                context.scene.collection,
+                "Models",
+                "Game Models",
+            )
+
+        bl_flvers = {}  # type: dict[str, BlenderFLVER]
+
+        # Construction of BlenderFLVER cannot be parallelized, unfortunately.
+        for model_name, flver in flvers.items():
+
+            if flver.meshes:
+                # Check for errors in merging and/or material creation.
+                if not flver_merge_successes[model_name] and flver_bl_materials[model_name] is not None:
+                    operator.error(f"Cannot import FLVER '{model_name}' ({flver.path_name}) due to `MergedMesh` error.")
+                    continue
+                if flver_bl_materials[model_name] is None and flver_merge_successes[model_name]:
+                    operator.error(f"Cannot import FLVER: '{model_name}' ({flver.path_name}) due to material error.")
+                    continue
+                bl_materials = flver_bl_materials[model_name]
+                mesh_bl_material_indices = flver_mesh_bl_material_indices[model_name]
+            else:
+                bl_materials = None
+                mesh_bl_material_indices = None
+
+            try:
+                bl_flver = BlenderFLVER.new_from_soulstruct_obj(
+                    operator,
+                    context,
+                    flver,
+                    name=model_name,
+                    texture_finders=texture_finders,
+                    collection=collection,
+                    existing_bl_materials=bl_materials,
+                    existing_mesh_bl_material_indices=mesh_bl_material_indices,
+                )
+                progress(step)
+                step += 1
+            except Exception as ex:
+                traceback.print_exc()  # for inspection in Blender console
+                operator.error(f"Cannot import {flver_model_category}FLVER: {flver.path_name}. Error: {ex}")
+            else:
+                bl_flvers[model_name] = bl_flver
+
+        if context.window_manager:
+            context.window_manager.progress_end()
+
+        operator.info(
+            f"Imported {len(flvers)} {flver_model_category}FLVERs in {time.perf_counter() - p:.2f} seconds."
+        )
+
+        return bl_flvers
 
     @classmethod
     def create_materials(
@@ -380,7 +659,8 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
         model_name: str,
         material_blend_mode: str,
         image_import_manager: ImageImportManager | None = None,
-        bl_materials_by_matdef_name: dict[str, bpy.types.Material] = None,
+        texture_finders: tp.Sequence[pyre_flver.TextureFinder] = (),
+        bl_materials_by_matdef_name: dict[str, bpy.types.Material] | None = None,
     ) -> CreatedFLVERMaterials:
         """Create Blender materials needed for `flver`.
 
@@ -392,16 +672,25 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
             - a list of UV layer names for each Blender material (NOT for each mesh)
         """
         return create_materials(
-            operator, context, flver, model_name, material_blend_mode, image_import_manager, bl_materials_by_matdef_name
+            operator,
+            context,
+            flver,
+            model_name,
+            material_blend_mode=material_blend_mode,
+            image_import_manager=image_import_manager,
+            texture_finders=texture_finders,
+            bl_materials_by_matdef_name=bl_materials_by_matdef_name,
         )
 
     def to_soulstruct_obj(
         self,
         operator: LoggingOperator,
         context: bpy.types.Context,
-        texture_collection: DDSTextureCollection = None,
+        texture_collection: DDSTextureCollection | None = None,
         flver_model_type=FLVERModelType.Unknown,
-    ) -> FLVER:
+    ) -> FLVER | pyre_flver.FLVER:
+        """Returns a Python `soulstruct` `FLVER` or a C++ `pyrelink` `FLVER`, depending on the `use_pyrelink_flver`
+        setting at the time of the call."""
         return create_flver_from_bl_flver(operator, context, self, texture_collection, flver_model_type)
 
     @property
@@ -450,31 +739,47 @@ class BlenderFLVER(BaseBlenderSoulstructObject[FLVER, FLVERProps]):
 
     @staticmethod
     def parse_flver_obj(obj: bpy.types.Object) -> tuple[ArmatureObject | None, MeshObject]:
-        """Parse a Blender object into a Mesh and (optional) Armature object."""
+        """Parse a Blender FLVER object into a Mesh and (optional) Armature object."""
         if obj.type == "MESH" and obj.soulstruct_type == SoulstructType.FLVER:
             mesh = obj
             armature = mesh.parent if mesh.parent is not None and mesh.parent.type == "ARMATURE" else None
         elif obj.type == "ARMATURE":
             armature = obj
-            mesh_children = [
-                child
-                for child in armature.children
-                if child.type == "MESH"
-                and child.soulstruct_type == SoulstructType.FLVER
-                and not child.get("stan_source_mesh")
+            flver_mesh_children = [
+                child for child in armature.children
+                if child.type == "MESH" and child.soulstruct_type == SoulstructType.FLVER
             ]
-            if not mesh_children:
-                mesh_children = [
-                    child
-                    for child in armature.children
-                    if child.type == "MESH" and child.soulstruct_type == SoulstructType.FLVER
-                ]
-            if not mesh_children or mesh_children[0].soulstruct_type != SoulstructType.FLVER:
+            # Stan's Tools NPC draw-mask splitting hides the original Mesh (tagged 'stan_source_mesh') and parents
+            # per-mask split Meshes to the same Armature. Ignore the tagged source Mesh unless it is the only one.
+            non_source_mesh_children = [
+                child for child in flver_mesh_children if not child.get("stan_source_mesh")
+            ]
+            if non_source_mesh_children:
+                flver_mesh_children = non_source_mesh_children
+            if not flver_mesh_children:
                 raise SoulstructTypeError(
                     f"Armature '{armature.name}' has no FLVER Mesh child. Please create it, even if empty, and set its "
                     f"Soulstruct object type to FLVER using the General Settings panel."
                 )
-            mesh = mesh_children[0]
+            if len(flver_mesh_children) > 1:
+                # Filter by matching stem.
+                matching_mesh_children = [
+                    child for child in flver_mesh_children
+                    if get_model_name(child.name) == get_model_name(armature.name)
+                ]
+                if not matching_mesh_children:
+                    raise SoulstructTypeError(
+                        f"Armature '{armature.name}' has multiple FLVER Mesh children, but none match the Armature "
+                        f"model name. Please rename one Mesh child to match the Armature name."
+                    )
+                if len(matching_mesh_children) > 1:
+                    raise SoulstructTypeError(
+                        f"Armature '{armature.name}' has multiple FLVER Mesh children that match the Armature "
+                        f"model name. Please rename so exactly one Mesh child matches the Armature name."
+                    )
+                mesh = matching_mesh_children[0]
+            else:
+                mesh = flver_mesh_children[0]
         else:
             raise SoulstructTypeError(
                 f"Given object '{obj.name}' is not a FLVER Mesh or Armature parent of such. Cannot parse as FLVER."

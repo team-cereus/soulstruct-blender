@@ -4,10 +4,14 @@ __all__ = [
     "NVMHKTImportPanel",
 ]
 
-from soulstruct.blender.bpy_base.panel import SoulstructPanel
+from soulstruct.games import GameType
+
+from ...base.register import io_soulstruct_panel
+from ...bpy_base.panel import SoulstructPanel, smart_prop
 from .model_import import *
 
 
+@io_soulstruct_panel
 class NVMHKTImportPanel(SoulstructPanel):
     bl_label = "NVMHKT Import"
     bl_idname = "NVMHKT_PT_import"
@@ -19,12 +23,12 @@ class NVMHKTImportPanel(SoulstructPanel):
     @classmethod
     def poll(cls, context) -> bool:
         settings = context.scene.soulstruct_settings
-        return settings.is_game("ELDEN_RING")
+        return settings.is_game(GameType.EldenRing)
 
     # noinspection PyUnusedLocal
     def draw(self, context):
         settings = context.scene.soulstruct_settings
-        if not settings.is_game("ELDEN_RING"):
+        if not settings.is_game(GameType.EldenRing):
             self.layout.label(text="Elden Ring only.")
             return
 
@@ -33,16 +37,16 @@ class NVMHKTImportPanel(SoulstructPanel):
 
         settings_box = self.layout.box()
         settings_box.label(text="Import Settings")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "import_hires_navmeshes")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "import_lores_navmeshes")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "correct_model_versions")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "create_dungeon_connection_points")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "overworld_transform_mode")
-        settings_box.prop(context.scene.nvmhkt_import_settings, "dungeon_transform_mode")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "import_hires_navmeshes")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "import_lores_navmeshes")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "correct_model_versions")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "create_dungeon_connection_points")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "overworld_transform_mode")
+        smart_prop(settings_box, context.scene.nvmhkt_import_settings, "dungeon_transform_mode")
 
         quick_box = self.layout.box()
         quick_box.label(text="From Game/Project")
-        quick_box.prop(context.scene.soulstruct_settings, "import_bak_file", text="From .BAK File")
+        smart_prop(quick_box, context.scene.soulstruct_settings, "import_bak_file", text="From .BAK File")
         quick_box.operator(ImportNVMHKTFromNVMHKTBND.bl_idname)
         quick_box.operator(ImportAllNVMHKTsFromNVMHKTBND.bl_idname)
         quick_box.operator(ImportAllOverworldNVMHKTs.bl_idname)

@@ -16,13 +16,13 @@ import bpy
 from soulstruct.containers import BinderEntry
 from soulstruct.eldenring.containers import DivBinder
 
-from soulstruct.blender.animation.import_operators import ImportHKXAnimationWithBinderChoice
-from soulstruct.blender.animation.types import SoulstructAnimation
-from soulstruct.blender.animation.utilities import (
+from ..animation.import_operators import ImportHKXAnimationWithBinderChoice
+from ..animation.types import SoulstructAnimation
+from ..animation.utilities import (
     import_character_hkx_animation_entry,
     load_character_anibnd_bundle,
 )
-from soulstruct.blender.utilities import LoggingOperator
+from ..base.operators import LoggingOperator
 
 from .debug_log import stan_debug, stan_info, stan_warning
 from .equip_weapon_param import get_weapon_row
@@ -34,6 +34,7 @@ from .weapon_attack_slots import (
     attack_hkx_stem,
     get_attack_slot,
 )
+from ..base.register import io_soulstruct_operator
 
 _HKX_ENTRY_RE = re.compile(r"^a.*\.hkx(\.dcx)?$", re.IGNORECASE)
 
@@ -51,7 +52,7 @@ def _resolve_anibnd_path(settings, stem: str):
     None), so callers must not assume a falsy return — we translate that into None here.
     """
     try:
-        game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game]
+        game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game_type]
     except KeyError:
         return None
     relative_path = Path(game_anim_info.relative_binder_path.format(model_name=stem))
@@ -127,6 +128,7 @@ def _attack_slot_enum_items(self, context):
     return StanLoadWeaponAttackAnimation._attack_slot_items
 
 
+@io_soulstruct_operator
 class StanLoadWeaponAttackAnimation(LoggingOperator):
     """Load a c0000 weapon attack clip onto the player c0000 armature."""
 

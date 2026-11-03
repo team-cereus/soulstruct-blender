@@ -11,13 +11,15 @@ __all__ = [
 
 import bpy
 
-from soulstruct.blender.utilities.operators import LoggingOperator
-from soulstruct.blender.types import SoulstructType
-from soulstruct.blender.msb.properties.parts import BlenderMSBPartSubtype
+from ...base.operators import LoggingOperator
+from ...base.register import io_soulstruct_operator
+from ...types import SoulstructType
+from ...msb.properties.parts import BlenderMSBPartSubtype
 
 from .utils import export_csv
 
 
+@io_soulstruct_operator
 class MapProgressSelectObject(LoggingOperator):
     bl_idname = "soulstruct.select_object"
     bl_label = "Select Object"
@@ -36,6 +38,7 @@ class MapProgressSelectObject(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class SetMapProgressState(LoggingOperator):
     bl_idname = "soulstruct.set_state"
     bl_label = "Set State"
@@ -65,6 +68,7 @@ class SetMapProgressState(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ToggleMapProgressOverlay(LoggingOperator):
     bl_idname = "soulstruct.toggle_overlay"
     bl_label = "Enable Object-Color Shading"
@@ -81,6 +85,7 @@ class ToggleMapProgressOverlay(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportMapProgressCSV(LoggingOperator):
     bl_idname = "soulstruct.export_csv"
     bl_label = "Export Progress CSV"
@@ -108,6 +113,7 @@ class ExportMapProgressCSV(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class MapProgressBulkInit(LoggingOperator):
     bl_idname = "soulstruct.bulk_init"
     bl_label = "Mark all untracked MSB geometry progress as TODO"
@@ -189,6 +195,7 @@ class MapProgressBulkInit(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class RefreshMapProgressVisuals(LoggingOperator):
     bl_idname = "soulstruct.refresh_visuals"
     bl_label = "Refresh Visuals"

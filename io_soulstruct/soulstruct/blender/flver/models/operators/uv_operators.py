@@ -8,6 +8,7 @@ __all__ = [
     "ActivateUVMap",
     "FastUVUnwrap",
     "FastUVUnwrapIslands",
+    "UVUnwrapPinSurrounding",
     "RotateUVMapClockwise90",
     "RotateUVMapCounterClockwise90",
     "AddRandomUVTileOffsets",
@@ -21,11 +22,13 @@ import bpy
 import bmesh
 from mathutils import Matrix, Vector
 
-from soulstruct.blender.utilities import LoggingOperator
+from ....base.operators import LoggingOperator
+from ....base.register import io_soulstruct_operator
+from ....types import MeshObject
 
 
 # noinspection PyUnusedLocal
-def _get_uv_layer_items(self, context) -> list[tuple[str, str, str]]:
+def _get_uv_map_items(self, context) -> list[tuple[str, str, str]]:
     if context.active_object and context.active_object.type == "MESH":
         ActivateUVMap.UV_LAYER_NAMES = [
             (uv.name, uv.name, uv.name)
@@ -36,6 +39,7 @@ def _get_uv_layer_items(self, context) -> list[tuple[str, str, str]]:
     return ActivateUVMap.UV_LAYER_NAMES
 
 
+@io_soulstruct_operator
 class ActivateUVMap(LoggingOperator):
 
     bl_idname = "object.activate_uv_map"
@@ -45,25 +49,25 @@ class ActivateUVMap(LoggingOperator):
     # Persistent storage for dynamic enum.
     UV_LAYER_NAMES: tp.ClassVar[list[tuple[str, str, str]]] = [("NONE", "None", "No UV map")]
 
-    uv_layer_name: bpy.props.EnumProperty(
-        name="UV Layer Name",
-        description="Name of the UV layer to activate in the UV Editor",
-        items=_get_uv_layer_items,
+    uv_map_name: bpy.props.EnumProperty(
+        name="UV Map Name",
+        description="Name of the UV map to activate in the UV Editor",
+        items=_get_uv_map_items,
     )
 
     @classmethod
     def poll(cls, context) -> bool:
         """Checks for an active Mesh object."""
-        return context.active_object and context.active_object.type == "MESH"
+        return context.active_object is not None and context.active_object.type == "MESH"
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context) -> set[str]:
-        if self.uv_layer_name == "NONE":
+        if self.uv_map_name == "NONE":
             return self.error("No UV layer selected.")
 
-        uv_layer_name = self.uv_layer_name
+        uv_map_name = self.uv_map_name
         # noinspection PyTypeChecker
         obj = context.active_object  # type: MeshObject
 
@@ -74,17 +78,17 @@ class ActivateUVMap(LoggingOperator):
         mat = obj.active_material
         nodes = mat.node_tree.nodes
 
-        # Search for an 'Attribute' node with the given UV layer name
-        attr_node = next(
-            (node for node in nodes if node.type == 'ATTRIBUTE' and node.attribute_name == uv_layer_name), None
+        # Search for a 'UVMap' node with the given UV map name
+        uv_node = next(
+            (node for node in nodes if node.type == "UVMAP" and node.uv_map == uv_map_name), None
         )
 
-        if not attr_node:
-            return self.error(f"Could not find UV attribute node for '{uv_layer_name}'.")
+        if not uv_node:
+            return self.error(f"Could not find UV map node set to '{uv_map_name}'.")
 
         # Find the first 'Image Texture' node linked to this 'Attribute' node
         for link in mat.node_tree.links:
-            if link.from_node == attr_node and link.to_node.type == 'TEX_IMAGE':
+            if link.from_node == uv_node and link.to_node.type == 'TEX_IMAGE':
                 # noinspection PyTypeChecker
                 image_node = link.to_node  # type: bpy.types.ShaderNodeTexImage
                 image = image_node.image
@@ -95,14 +99,15 @@ class ActivateUVMap(LoggingOperator):
                         area.spaces.active.image = image
 
                         # Set the active object UV layer (determines what the Image Editor says!)
-                        if uv_layer_name in obj.data.uv_layers:
-                            obj.data.uv_layers.active = obj.data.uv_layers[uv_layer_name]
+                        if uv_map_name in obj.data.uv_layers:
+                            obj.data.uv_layers.active = obj.data.uv_layers[uv_map_name]
 
                         return {"FINISHED"}
 
-        return self.error(f"No textures found that were linked to by the '{uv_layer_name}' attribute node.")
+        return self.error(f"No textures found that were linked to by the '{uv_map_name}' UV map node.")
 
 
+@io_soulstruct_operator
 class FastUVUnwrap(LoggingOperator):
 
     bl_idname = "uv.fast_uv_unwrap"
@@ -137,6 +142,7 @@ class FastUVUnwrap(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class FastUVUnwrapIslands(LoggingOperator):
 
     bl_idname = "uv.fast_uv_unwrap_islands"
@@ -223,6 +229,73 @@ def _rotate_uv_map(operator: LoggingOperator, context, angle_rad: float) -> set[
     return {"FINISHED"}
 
 
+@io_soulstruct_operator
+class UVUnwrapPinSurrounding(LoggingOperator):
+    bl_idname = "uv.uv_unwrap_pin_surrounding"
+    bl_label = "UV Unwrap Pin-Surrounding"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = (
+        "Unwrap selected faces while temporarily pinning faces of unselected adjacent faces"
+    )
+
+    # "ANGLE_BASED", "CONFORMAL", "MINIMUM_STRETCH"
+    method: bpy.props.EnumProperty(
+        name="Unwrap Method",
+        description="Method to use for unwrapping",
+        items=[
+            ("ANGLE_BASED", "Angle Based", "Unwrap using angle-based method"),
+            ("CONFORMAL", "Conformal", "Unwrap using conformal method"),
+            ("MINIMUM_STRETCH", "Minimum Stretch", "Unwrap using minimum stretch method"),
+        ],
+        default="ANGLE_BASED",
+    )
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return context.mode == "EDIT_MESH"
+
+    def execute(self, context):
+        obj = context.active_object
+        if not obj:
+            return self.error("No edited Mesh object to unwrap.")
+        mesh = obj.data
+        if not mesh or not isinstance(mesh, bpy.types.Mesh):
+            return self.error("No Mesh object to unwrap.")
+        bm = bmesh.from_edit_mesh(mesh)
+        uv_layer = bm.loops.layers.uv.active
+
+        # Remember originally selected faces
+        original_sel = {f for f in bm.faces if f.select}
+
+        # Grow selection to include adjacent faces
+        bpy.ops.mesh.select_more()
+
+        # Pin all UVs of the now-selected (neighbor) faces that were NOT in original selection
+        neighbor_faces = {f for f in bm.faces if f.select} - original_sel
+        for face in neighbor_faces:
+            for loop in face.loops:
+                loop[uv_layer].pin_uv = True
+
+        bmesh.update_edit_mesh(mesh)
+
+        # Restore original selection
+        for f in bm.faces:
+            f.select = f in original_sel
+        bmesh.update_edit_mesh(mesh)
+
+        # Unwrap
+        bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.001)
+
+        # Unpin the neighbors
+        for face in neighbor_faces:
+            for loop in face.loops:
+                loop[uv_layer].pin_uv = False
+
+        bmesh.update_edit_mesh(mesh)
+        return {'FINISHED'}
+
+
+@io_soulstruct_operator
 class RotateUVMapClockwise90(LoggingOperator):
 
     bl_idname = "uv.rotate_uv_map_clockwise_90"
@@ -237,6 +310,7 @@ class RotateUVMapClockwise90(LoggingOperator):
         return _rotate_uv_map(self, context, -math.pi / 2.0)
 
 
+@io_soulstruct_operator
 class RotateUVMapCounterClockwise90(LoggingOperator):
 
     bl_idname = "uv.rotate_uv_map_counter_clockwise_90"
@@ -251,6 +325,7 @@ class RotateUVMapCounterClockwise90(LoggingOperator):
         return _rotate_uv_map(self, context, math.pi / 2.0)
 
 
+@io_soulstruct_operator
 class AddRandomUVTileOffsets(LoggingOperator):
 
     bl_idname = "uv.add_random_uv_tile_offsets"

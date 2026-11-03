@@ -14,7 +14,7 @@ from soulstruct.base.models.shaders import MatDef
 from soulstruct.base.maps.msb import MSB as BaseMSB
 from soulstruct.base.maps.navmesh import BaseNVMBND
 from soulstruct.containers.tpf import TPFPlatform
-from soulstruct.games import *
+from soulstruct.games import GameType
 
 from soulstruct import demonssouls, darksouls1ptde, darksouls1r, bloodborne, darksouls3, eldenring, nightreign
 
@@ -23,7 +23,7 @@ from soulstruct.havok.enums import HavokModule
 from soulstruct.havok.fromsoft.base import BaseSkeletonHKX, BaseAnimationHKX
 
 
-@dataclass(slots=True, kw_only=True)
+@dataclass(slots=True, kw_only=True, frozen=True)
 class BlenderGameConfig:
     """Fixed configuration data and game-specific classes for a specific game."""
 
@@ -33,8 +33,8 @@ class BlenderGameConfig:
     uses_matbin: bool = False
     matdef_class: type[MatDef] | None = None
     _split_mesh_kwargs: dict[str, int | bool] = field(default_factory=lambda: dict(
-        use_mesh_bone_indices=False,
-        max_mesh_vertex_count=4294967295,  # faces use 32-bit vertex indices
+        use_mesh_bone_indices=False,  # for newer games
+        max_mesh_vertex_count=4294967295,  # for newer games (faces use 32-bit vertex indices)
     ))
 
     # MSB CONFIG
@@ -54,6 +54,7 @@ class BlenderGameConfig:
     supports_cutscenes: bool = False  # `RemoBND` support
 
     # MISC CONFIG
+    requires_oodle: bool = False  # DCX/BND compression uses Oodle Kraken, which needs `oo2core_*.dll` loaded
     # Redirect files that do and do not use the latest version of map files (e.g. to handle Darkroot Garden in DS1).
     new_to_old_map: dict[str, str] = field(default_factory=dict)
     old_to_new_map: dict[str, str] = field(default_factory=dict)
@@ -94,25 +95,27 @@ class BlenderGameConfig:
 
     @property
     def split_mesh_kwargs(self) -> dict[str, int | bool]:
-        """Return a copy of game-specific FLVER mesh-splitting kwargs."""
+        """Return a copy of game-specific FLVER mesh-splitting kwargs.
+
+        NOTE: These kwargs work for both `soulstruct` and `pyrelink` mesh-splitting functions.
+        """
         return self._split_mesh_kwargs.copy()
 
 
 BLENDER_GAME_CONFIG = {
-    DEMONS_SOULS: BlenderGameConfig(
+    GameType.DemonsSouls: BlenderGameConfig(
         flver_default_version=FLVERVersion.DemonsSouls,
         swizzle_platform=TPFPlatform.PC,  # no swizzling despite being a PS3 exclusive
         matdef_class=demonssouls.models.MatDef,
         _split_mesh_kwargs=dict(
             use_mesh_bone_indices=True,
-            max_bones_per_mesh=38,
+            max_bones_per_mesh=28,  # hard max for FLVER0
             max_mesh_vertex_count=65535,  # faces MUST use 16-bit vertex indices
         ),
 
         msb_class=demonssouls.maps.MSB,
         map_constants=demonssouls.maps.constants,
 
-        # TODO: No idea why PyCharm is complaining about type here. Can't seem to detect 'type[BaseNVMBND] hint above.
         nvmbnd_class=demonssouls.maps.navmesh.NVMBND,
         supports_mcg=True,
 
@@ -122,7 +125,7 @@ BLENDER_GAME_CONFIG = {
         supports_collision_model=True,
         uses_loose_collision_files=True,
     ),
-    DARK_SOULS_PTDE: BlenderGameConfig(
+    GameType.DarkSoulsPTDE: BlenderGameConfig(
         flver_default_version=FLVERVersion.DarkSouls_A,
         matdef_class=darksouls1ptde.models.MatDef,
         _split_mesh_kwargs=dict(
@@ -152,7 +155,7 @@ BLENDER_GAME_CONFIG = {
         use_new_map=(".msb", ".nvmbnd", ".mcg", ".mcp"),
         use_old_map=(".flver", ".hkx"),
     ),
-    DARK_SOULS_DSR: BlenderGameConfig(
+    GameType.DarkSoulsDSR: BlenderGameConfig(
         flver_default_version=FLVERVersion.DarkSouls_A,
         matdef_class=darksouls1r.models.MatDef,
         _split_mesh_kwargs=dict(
@@ -181,7 +184,7 @@ BLENDER_GAME_CONFIG = {
         use_new_map=(".msb", ".nvmbnd", ".mcg", ".mcp"),
         use_old_map=(".flver", ".hkxbhd", ".hkxbdt"),
     ),
-    BLOODBORNE: BlenderGameConfig(
+    GameType.Bloodborne: BlenderGameConfig(
         flver_default_version=FLVERVersion.Bloodborne_DS3_A,
         matdef_class=bloodborne.models.MatDef,
 
@@ -195,7 +198,7 @@ BLENDER_GAME_CONFIG = {
         animation_hkx_class=hk_fromsoft.bloodborne.AnimationHKX,
         supports_collision_model=False,  # TODO: could at least read hknp meshes
     ),
-    DARK_SOULS_3: BlenderGameConfig(
+    GameType.DarkSouls3: BlenderGameConfig(
         flver_default_version=FLVERVersion.Bloodborne_DS3_A,
         matdef_class=None,  # TODO: not in Soulstruct yet
 
@@ -208,7 +211,7 @@ BLENDER_GAME_CONFIG = {
         animation_hkx_class=None,
         supports_collision_model=False,  # TODO: could at least read hknp meshes
     ),
-    SEKIRO: BlenderGameConfig(
+    GameType.Sekiro: BlenderGameConfig(
         flver_default_version=FLVERVersion.Sekiro_EldenRing,
         matdef_class=None,  # TODO: not in Soulstruct yet
 
@@ -218,8 +221,9 @@ BLENDER_GAME_CONFIG = {
         skeleton_hkx_class=hk_fromsoft.sekiro.SkeletonHKX,
         animation_hkx_class=hk_fromsoft.sekiro.AnimationHKX,
         supports_collision_model=False,
+        requires_oodle=True,
     ),
-    ELDEN_RING: BlenderGameConfig(
+    GameType.EldenRing: BlenderGameConfig(
         flver_default_version=FLVERVersion.Sekiro_EldenRing,
         uses_matbin=True,  # first game to use MATBIN rather than MTD
         matdef_class=eldenring.models.MatDef,
@@ -231,8 +235,9 @@ BLENDER_GAME_CONFIG = {
         skeleton_hkx_class=hk_fromsoft.eldenring.SkeletonHKX,
         animation_hkx_class=hk_fromsoft.eldenring.AnimationHKX,
         supports_collision_model=False,
+        requires_oodle=True,
     ),
-    NIGHTREIGN: BlenderGameConfig(
+    GameType.Nightreign: BlenderGameConfig(
         flver_default_version=FLVERVersion.Nightreign,
         uses_matbin=True,
         matdef_class=eldenring.models.MatDef,
@@ -242,5 +247,6 @@ BLENDER_GAME_CONFIG = {
         skeleton_hkx_class=hk_fromsoft.eldenring.SkeletonHKX,
         animation_hkx_class=hk_fromsoft.eldenring.AnimationHKX,
         supports_collision_model=False,
+        requires_oodle=True,
     ),
 }

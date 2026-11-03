@@ -15,18 +15,27 @@ import bpy
 import numpy as np
 
 from soulstruct.flver import *
+from soulstruct.flver.bone_tools import BoneTree
+from soulstruct.flver.utilities import hash_material
 from soulstruct.base.models.shaders import MatDef
-from soulstruct.games import DEMONS_SOULS
+from soulstruct.games import GameType
+from soulstruct.utilities.maths import Vector3, SINGLE_MIN, SINGLE_MAX
 
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.flver.image.types import DDSTextureCollection
-from soulstruct.blender.flver.material.properties import get_cached_mtdbnd, get_cached_matbinbnd
-from soulstruct.blender.flver.material.types import BlenderFLVERMaterial
-from soulstruct.blender.flver.models.properties import FLVERExportSettings
-from soulstruct.blender.general import BLENDER_GAME_CONFIG, SoulstructSettings
-from soulstruct.blender.utilities import *
+import pyrelink.core as pyre_core
+import pyrelink.flver as pyre_flver
 
+from .....base.operators import *
+from .....exceptions import *
+from .....flver.image.types import DDSTextureCollection
+from .....flver.material.types import BlenderFLVERMaterial
+from .....flver.models.properties import FLVERExportSettings
+from .....flver.utilities import *
+from .....general import BLENDER_GAME_CONFIG, SoulstructSettings
+from .....general.matdefs import get_cached_mtdbnd, get_cached_matbinbnd
+from .....utilities import *
 from ..enums import FLVERModelType, FLVERBoneDataType
+
+# Private implementation modules:
 from ._export_bones import create_flver_bones
 
 if tp.TYPE_CHECKING:
@@ -48,14 +57,17 @@ class _CreateFLVERCommand:
     texture_collection: DDSTextureCollection | None = None
 
     # State initialized in `__post_init__`:
-    flver: FLVER = field(default=None, init=False)
+    flver: FLVER | pyre_flver.FLVER = field(default=None, init=False)
     settings: SoulstructSettings = field(default=None, init=False)
     export_settings: FLVERExportSettings = field(default=None, init=False)
     mtdbnd: MTDBND | None = field(default=None, init=False)
     matbinbnd: MATBINBND | None = field(default=None, init=False)
 
     def __post_init__(self):
-        """Create an empty FLVER. This is the first step in the FLVER export process."""
+        """Create an empty FLVER (Python `soulstruct` or C++ `pyrelink`, depending on `use_pyrelink_flver` setting).
+
+        This is the first step in the FLVER export process.
+        """
 
         if self.texture_collection is None:
             # Passed all the way through to the node inspection in FLVER materials to map texture stems to Images.
@@ -65,16 +77,15 @@ class _CreateFLVERCommand:
         self.settings = self.context.scene.soulstruct_settings
         self.export_settings = self.context.scene.flver_export_settings
 
-        if BLENDER_GAME_CONFIG[self.settings.game].uses_matbin:
+        if BLENDER_GAME_CONFIG[self.settings.game_type].uses_matbin:
             self.matbinbnd = get_cached_matbinbnd(self.operator, self.context)
         else:
             self.mtdbnd = get_cached_mtdbnd(self.operator, self.context)
 
         if self.bl_flver.version == "DEFAULT":
             # Default is game-dependent.
-            try:
-                version = self.settings.game_config.flver_default_version
-            except KeyError:
+            version = self.settings.game_config.flver_default_version
+            if version is None:
                 raise ValueError(
                     f"Do not know default FLVER Version for game {self.settings.game}. You must set 'Version' yourself "
                     f"on FLVER object '{self.name}' before exporting."
@@ -85,8 +96,26 @@ class _CreateFLVERCommand:
             except KeyError:
                 raise ValueError(f"Invalid FLVER Version: '{self.bl_flver.version}'. Please report this to Grimrukh!")
 
-        if version <= 0xFFFF:
-            # FLVER0 (Demon's Souls)
+        is_flver0 = version <= 0xFFFF  # FLVER0 (Demon's Souls)
+
+        if self.settings.use_pyrelink_flver:
+            # Construct empty C++ `pyre_flver.FLVER` object.
+            self.flver = pyre_flver.FLVER()
+            self.flver.big_endian = self.bl_flver.big_endian
+            self.flver.version = pyre_flver.FLVERVersion(version)
+            self.flver.unicode = self.bl_flver.unicode
+            if is_flver0:
+                self.flver.f0_unk_x4a = self.bl_flver.f0_unk_x4a
+                self.flver.f0_unk_x4b = self.bl_flver.f0_unk_x4b
+                self.flver.f0_unk_x4c = self.bl_flver.f0_unk_x4c
+                self.flver.f0_unk_x5c = self.bl_flver.f0_unk_x5c
+            else:
+                self.flver.f2_unk_x4a = self.bl_flver.f2_unk_x4a
+                self.flver.f2_unk_x4c = self.bl_flver.f2_unk_x4c
+                self.flver.f2_unk_x5c = self.bl_flver.f2_unk_x5c
+                self.flver.f2_unk_x5d = self.bl_flver.f2_unk_x5d
+                self.flver.f2_unk_x68 = self.bl_flver.f2_unk_x68
+        elif is_flver0:
             self.flver = FLVER(
                 big_endian=self.bl_flver.big_endian,
                 version=version,
@@ -122,10 +151,15 @@ def create_flver_from_bl_flver(
     operator: LoggingOperator,
     context: bpy.types.Context,
     bl_flver: BlenderFLVER,
-    texture_collection: DDSTextureCollection = None,
+    texture_collection: DDSTextureCollection | None = None,
     flver_model_type=FLVERModelType.Unknown,
-) -> FLVER:
-    """Wraps actual method with temp FLVER management."""
+) -> FLVER | pyre_flver.FLVER:
+    """Wraps actual method with temp FLVER management.
+
+    Returns a Python `soulstruct` `FLVER` or a C++ `pyrelink` `FLVER`, depending on the `use_pyrelink_flver` setting
+    at the time of the call. This setting determines which FLVER class exists in `command.flver`, which is then checked
+    for conditions in this function and its sub-functions.
+    """
 
     command = _CreateFLVERCommand(operator, context, bl_flver, bl_flver.name, flver_model_type, texture_collection)
 
@@ -153,7 +187,7 @@ def _clear_temp_flver():
         pass
 
 
-def _create_flver_from_bl_flver(command: _CreateFLVERCommand) -> FLVER:
+def _create_flver_from_bl_flver(command: _CreateFLVERCommand) -> FLVER | pyre_flver.FLVER:
     """`FLVER` exporter. By far the most complicated single function in the add-on!"""
 
     if command.bl_flver.armature:
@@ -164,31 +198,49 @@ def _create_flver_from_bl_flver(command: _CreateFLVERCommand) -> FLVER:
         bl_dummies = []
         bl_bone_data_type = FLVERBoneDataType.OMITTED
 
-    if not command.bl_flver.armature or not command.bl_flver.armature.pose.bones:
+    bl_armature = command.bl_flver.armature
+    if not bl_armature or not bl_armature.pose or not bl_armature.pose.bones:
         command.operator.info(  # not a warning
             f"No non-empty FLVER Armature to export. Creating FLVER skeleton with a single default bone at origin "
             f"named '{command.bl_flver.game_name}'."
         )
-        default_bone = FLVERBone(name=command.bl_flver.game_name)  # default transform and other fields
-        command.flver.bones.append(default_bone)
+        if isinstance(command.flver, pyre_flver.FLVER):
+            default_bone = pyre_flver.Bone()
+            default_bone.name = command.bl_flver.game_name  # rest of default transform and other fields are fine
+            # NOTE: `flver.bones` is not a live reference for pyrelink FLVERs, so we assign the whole (single-bone)
+            # list rather than appending to the (empty) list returned by the property getter.
+            # TODO: Add a live reference to bones (and dummies, meshes, etc.) for pyrelink FLVER.
+            command.flver.bones = [default_bone]
+        else:  # soulstruct FLVER
+            default_bone = FLVERBone(name=command.bl_flver.game_name)  # default transform and other fields
+            command.flver.bones.append(default_bone)
         using_default_bone = True
     else:
         create_flver_bones(
-            command.operator, command.context, command.bl_flver.armature, command.flver, bl_bone_data_type
+            command.operator, command.context, bl_armature, command.flver, bl_bone_data_type
         )
         using_default_bone = False
 
     # Make Mesh the active object again.
     command.context.view_layer.objects.active = command.bl_flver.mesh
 
+    # NOTE: `flver.dummies` is not a live reference for pyrelink FLVERs, so we build a plain list here and assign it
+    # all at once via the setter afterward (this also works fine for soulstruct FLVERs, whose `dummies` list is
+    # empty at this point anyway).
+    flver_dummies = []
     for bl_dummy in bl_dummies:
-        flver_dummy = bl_dummy.to_soulstruct_obj(command.operator, command.context, command.bl_flver.armature)
+        flver_dummy = bl_dummy.to_soulstruct_obj(
+            command.operator, command.context, command.bl_flver.armature, bl_bone_data_type
+        )
         # Mark attach/parent bones as used. TODO: Set more specific flags in later games (2 here).
         if flver_dummy.attach_bone_index >= 0:
             command.flver.bones[flver_dummy.attach_bone_index].usage_flags &= ~1
         if flver_dummy.parent_bone_index >= 0:
             command.flver.bones[flver_dummy.parent_bone_index].usage_flags &= ~1
-        command.flver.dummies.append(flver_dummy)
+        if isinstance(command.flver, pyre_flver.FLVER):
+            flver_dummy = dummy_to_pyrelink(flver_dummy)
+        flver_dummies.append(flver_dummy)
+    command.flver.dummies = flver_dummies
 
     # `MatDef` for each Blender material is needed to determine which Blender UV layers to use for which loops.
     matdef_class = command.settings.game_config.matdef_class
@@ -211,34 +263,32 @@ def _create_flver_from_bl_flver(command: _CreateFLVERCommand) -> FLVER:
             command.operator.warning(f"Exporting non-c0000/c1000 FLVER '{command.bl_flver.name}' with no mesh data.")
         return command.flver
 
-    if command.flver_model_type == FLVERModelType.Unknown:
-        # Guess model type based on name.
-        # TODO: For layouts, probably better off checking MTD prefix 'M' or 'C'?
-        use_map_piece_layout = FLVERModelType.guess_from_name(command.name) == FLVERModelType.MapPiece
-    else:
-        use_map_piece_layout = command.flver_model_type == FLVERModelType.MapPiece
-
     _create_flver_meshes(
         command,
         bl_bone_names=[bone.name for bone in command.flver.bones],
-        use_map_piece_layout=use_map_piece_layout,
         matdefs=matdefs,
         using_default_bone=using_default_bone,
+        bl_bone_data_type=bl_bone_data_type,
     )
 
-    # TODO: Bone bounding box space seems to be always local to the bone for characters and always in armature space
-    #  for map pieces. Not sure about objects, could be some of each (haven't found any non-origin bones that any
-    #  vertices are weighted to with `is_dynamic=True`). This is my temporary hack since we are already using
-    #  'read_bone_type == FLVERBoneDataType.POSE' as a marker for map pieces.
-    # TODO: Better heuristic is likely to use the bone weights themselves (missing or all zero -> armature space).
-    # TODO: At least one object with all `is_dynamic = False` (o1154 in DSR) has 'undefined' bone bounding boxes (i.e.
-    #  SINGLE_MAX for min and SINGLE_MIN for max).
-    command.flver.refresh_bone_bounding_boxes(in_local_space=bl_bone_data_type == FLVERBoneDataType.EDIT)
+    if isinstance(command.flver, FLVER):  # soulstruct
+        # TODO: Bone bounding box space seems to be always local to the bone for characters and always in armature
+        #  space for map pieces. Not sure about objects, could be some of each (haven't found any non-origin bones
+        #  that any vertices are weighted to with `is_dynamic=True`). This is my temporary hack since we are
+        #  already using 'read_bone_type == FLVERBoneDataType.POSE' as a marker for map pieces.
+        # TODO: Better heuristic is likely to use the bone weights themselves (missing or all zero -> armature
+        #  space).
+        # TODO: At least one object with all `is_dynamic = False` (o1154 in DSR) has 'undefined' bone bounding boxes
+        #  (i.e. SINGLE_MAX for min and SINGLE_MIN for max).
+        command.flver.refresh_bone_bounding_boxes(in_local_space=bl_bone_data_type == FLVERBoneDataType.EDIT)
 
-    # Refresh `FLVERMesh` and FLVER-wide bounding boxes.
-    # TODO: Partially redundant since splitter does this for meshes automatically. Only need FLVER-wide bounds in
-    #  that case...
-    command.flver.refresh_bounding_boxes()
+        # Refresh `FLVERMesh` and FLVER-wide bounding boxes.
+        # TODO: Partially redundant since splitter does this for meshes automatically. Only need FLVER-wide bounds
+        #  in that case...
+        command.flver.refresh_bounding_boxes()
+    # else: bounding boxes (FLVER-wide and per-bone) are computed directly from the merged vertex arrays inside
+    # `_create_flver_meshes()`, since `pyre_flver.FLVER` has no `refresh_bone_bounding_boxes`/
+    # `refresh_bounding_boxes` equivalent methods (mesh-level bounding boxes are computed by the C++ splitter).
 
     return command.flver
 
@@ -246,9 +296,9 @@ def _create_flver_from_bl_flver(command: _CreateFLVERCommand) -> FLVER:
 def _create_flver_meshes(
     command: _CreateFLVERCommand,
     bl_bone_names: list[str],
-    use_map_piece_layout: bool,
     matdefs: list[MatDef],
     using_default_bone: bool,
+    bl_bone_data_type: FLVERBoneDataType,
 ):
     """
     Construct a `MergedMesh` from Blender data, in a straightforward way (unfortunately using `for` loops over
@@ -260,10 +310,16 @@ def _create_flver_meshes(
     We only respect Face Set Count > 1 if requested in export options. (Duplicating the main face set is only
     viable in older games with low-res meshes, but those same games don't even really need LODs anyway.)
     """
+    is_pyre_flver = isinstance(command.flver, pyre_flver.FLVER)
+
+    # If ALL meshes are dynamic or non-dynamic, we can make some shortcuts here.
+    # Otherwise, we have to act like it could be a mixture when collecting bone weights.
+    all_dynamic, all_static = command.bl_flver.type_properties.get_all_dynamic_static()
 
     # 1. Create per-mesh info. Note that every Blender material index is guaranteed to be mapped to AT LEAST ONE
     #    split `FLVERMesh` in the exported FLVER (more if mesh bone maximum is exceeded). This allows the user to
     #    also split their meshes manually in Blender, if they wish.
+    # Built as soulstruct `SplitMeshDef`s, then converted to pyrelink defs below if needed.
     split_mesh_defs = []  # type: list[SplitMeshDef]
 
     bl_materials = command.bl_flver.get_materials()
@@ -274,35 +330,38 @@ def _create_flver_meshes(
         )
 
     # Decide if we should use per-submesh properties or global submesh properties.
+    # Note that the number of mesh kwargs given to the MergedMesh for splitting matches the number of Blender materials.
+    # The split function will create additional meshes as needed (for bone limits, etc.) and duplicate the kwargs.
     flver_props = command.bl_flver.type_properties
-    flver_mesh_kwargs = []
+    split_mesh_def_kwargs = []
     if len(flver_props.submesh_props) > 0:
         if len(flver_props.submesh_props) != len(bl_materials):
             raise FLVERExportError(
                 f"Number of submesh properties ({len(flver_props.submesh_props)}) does not match number of Blender materials "
-                f"({len(bl_materials)})."
+                f"({len(bl_materials)}). You must either set submesh properties for every material or use global "
+                f"submesh properties for the FLVER."
             )
         for i, s in enumerate(flver_props.submesh_props):
-            flver_mesh_kwargs.append({
-                "is_dynamic": s.is_dynamic,
-                "default_bone_index": s.default_bone_index,
-                "face_set_count": s.face_set_count if command.export_settings.create_lod_face_sets else 1,
-                "use_backface_culling": s.resolve_use_backface_culling(bl_materials[i].material.use_backface_culling),
-                "f0_unk_x46": 0,  # TODO: not sure what this is yet and haven't seen non-zero
-                "uses_bounding_boxes": True,  # enabled even for FLVER0 versions
-            })
+            split_mesh_def_kwargs.append(dict(
+                is_dynamic=s.is_dynamic,
+                default_bone_index=s.default_bone_index,
+                face_set_count=s.face_set_count if command.export_settings.create_lod_face_sets else 1,
+                use_backface_culling=s.resolve_use_backface_culling(bl_materials[i].material.use_backface_culling),
+                uses_bounding_boxes=True,  # enabled even for FLVER0 versions
+                f0_unk_x46=0,  # TODO: not sure what this is yet and haven't seen non-zero
+            ))
     else:
         # Same kwargs for all FLVER meshes.
-        flver_mesh_kwargs = [{
-            "is_dynamic": flver_props.global_is_dynamic,
-            "default_bone_index": flver_props.global_default_bone_index,
-            "face_set_count": flver_props.global_face_set_count if command.export_settings.create_lod_face_sets else 1,
-            "use_backface_culling": bl_materials[i].material.use_backface_culling,  # always use material
-            "f0_unk_x46": 0,
-            "uses_bounding_boxes": True,
-        } for i in range(len(bl_materials))]
+        split_mesh_def_kwargs = [dict(
+            is_dynamic=flver_props.global_is_dynamic,
+            default_bone_index=flver_props.global_default_bone_index,
+            face_set_count=flver_props.global_face_set_count if command.export_settings.create_lod_face_sets else 1,
+            use_backface_culling=bl_materials[i].material.use_backface_culling,  # always use material
+            uses_bounding_boxes=True,
+            f0_unk_x46=0,  # TODO: not sure what this is yet and haven't seen non-zero
+        ) for i in range(len(bl_materials))]
 
-    if command.settings.is_game(DEMONS_SOULS):
+    if command.settings.is_game(GameType.DemonsSouls):
         # Use absolute texture path prefix, featuring model stem and other subdirectories.
         # NOTE: Almost certainly doesn't actually matter in-game.
         get_texture_path_prefix = _get_des_texture_path_prefix_getter(command.name, command.flver_model_type)
@@ -310,18 +369,24 @@ def _create_flver_meshes(
         # Paths in later games are just naked file names.
         get_texture_path_prefix = None
 
-    for matdef, bl_material, mesh_kwargs in zip(matdefs, bl_materials, flver_mesh_kwargs, strict=True):
+    for matdef, bl_material, split_mesh_def_kw in zip(
+        matdefs, bl_materials, split_mesh_def_kwargs, strict=True
+    ):
         bl_material: BlenderFLVERMaterial
         split_mesh_def = bl_material.to_split_mesh_def(
             command.operator,
             command.context,
-            matdef,
-            use_map_piece_layout=use_map_piece_layout,
-            mesh_kwargs=mesh_kwargs,
+            matdef=matdef,
             texture_collection=command.texture_collection,
             get_texture_path_prefix=get_texture_path_prefix,
+            **split_mesh_def_kw,  # passthrough
         )
         split_mesh_defs.append(split_mesh_def)
+
+    _unify_flver0_material_layouts(command, split_mesh_defs)
+
+    if is_pyre_flver:
+        split_mesh_defs = [split_mesh_def_to_pyrelink(smd) for smd in split_mesh_defs]
 
     # 2. Validate UV layers: ensure all required material UV layer names are present, and warn if any unexpected
     #    Blender UV layers are present.
@@ -355,22 +420,7 @@ def _create_flver_meshes(
     # Slow part number 1: iterating over every Blender vertex to retrieve its position and bone weights/indices.
     # We at least know the size of the array in advance.
     vertex_count = len(tri_mesh_data.vertices)
-    if use_map_piece_layout and command.flver.version.map_pieces_use_normal_w_bones():
-        # Bone weights/indices not in array. `normal_w` is used for single Map Piece bone.
-        vertex_data_dtype = [
-            ("position", "f", 3),
-        ]
-        use_normal_w_bone_index = True
-    else:
-        # Rigged FLVERs and older games' Map Pieces.
-        vertex_data_dtype = [
-            ("position", "f", 3),  # TODO: support 4D position (see, e.g., Rykard slime in ER: c4711)
-            ("bone_weights", "f", 4),
-            ("bone_indices", "i", 4),
-        ]
-        use_normal_w_bone_index = False
 
-    vertex_data = np.empty(vertex_count, dtype=vertex_data_dtype)
     vertex_positions = np.empty((vertex_count, 3), dtype=np.float32)
     command.bl_flver.mesh.data.vertices.foreach_get("co", vertex_positions.ravel())
     vertex_bone_weights = np.zeros((vertex_count, 4), dtype=np.float32)  # default: 0.0
@@ -388,6 +438,7 @@ def _create_flver_meshes(
     # Unfortunately, there is no way to retrieve the weighted bones of vertices without iterating over all vertices.
     # We iterate over the original, non-triangulated mesh, as the vertices should be the same and these vertices
     # have their bone vertex groups (which cannot easily be transferred to the triangulated copy).
+    invalid_static_vertex_indices = []
     for i, vertex in enumerate(command.mesh.data.vertices):
         bone_indices = []  # global (splitter will make them local to mesh if appropriate)
         bone_weights = []
@@ -399,9 +450,8 @@ def _create_flver_meshes(
                 raise FLVERExportError(f"Vertex is weighted to invalid bone name: '{mesh_group.name}'.")
             bone_indices.append(bone_index)
             used_bone_indices.add(bone_index)
-            # We don't waste time calling retrieval method `weight()` for map pieces.
-            if not use_map_piece_layout:
-                # TODO: `vertex_group` has `group` (int) and `weight` (float) on it already?
+            # Skip weight retrieval only when ALL meshes are confirmed non-dynamic (map pieces only).
+            if not all_static:
                 bone_weights.append(mesh_group.weight(i))
 
         if len(bone_indices) > 4:
@@ -409,7 +459,7 @@ def _create_flver_meshes(
                 f"Vertex {i} cannot be weighted to {len(bone_indices)} bones (max 1 for Map Pieces, 4 for others)."
             )
         elif len(bone_indices) == 0:
-            if len(bl_bone_names) == 1 and use_map_piece_layout:
+            if len(bl_bone_names) == 1 and all_static:
                 # Omitted bone indices can be assumed to be the only bone in the skeleton.
                 # We issue a warning (once) unless this FLVER export is using a default bone (no Armature), in which
                 # case we obviously don't expect any vertices to be weighted to anything.
@@ -428,14 +478,16 @@ def _create_flver_meshes(
                     f"Vertex {i} is not weighted to any bones, and Map Piece FLVER has multiple bones."
                 )
 
-        if use_map_piece_layout:
+        if all_static:
+            # All vertices are guaranteed to be in static meshes only.
             if len(bone_indices) == 1:
                 # Duplicate single-element list to four-element list.
-                # (This is done even for games that will write only a single Map Piece bone to `normal_w`.)
+                # (This is done even for games that will write only a single static bone to `normal_w`.)
                 bone_indices *= 4
             else:
-                raise FLVERExportError(f"Map Piece vertices must be weighted to exactly one bone (vertex {i}).")
+                invalid_static_vertex_indices.append(i)
         else:
+            # This vertex could end up in dynamic (and/or static) meshes.
             # Pad out bone weights and (unused) indices for rigged meshes.
             while len(bone_weights) < 4:
                 bone_weights.append(0.0)
@@ -447,16 +499,15 @@ def _create_flver_meshes(
         if bone_weights:  # rigged only
             vertex_bone_weights[i] = bone_weights
 
+    if invalid_static_vertex_indices:
+        raise FLVERExportError(
+            f"Static mesh vertices must be weighted to exactly one bone. Vertices: {invalid_static_vertex_indices}"
+        )
+
     for used_bone_index in used_bone_indices:
         command.flver.bones[used_bone_index].usage_flags &= ~1
         if command.settings.is_er_family():  # TODO: Probably started in an earlier game.
             command.flver.bones[used_bone_index].usage_flags |= 8
-
-    vertex_data["position"] = vertex_positions
-    if "bone_weights" in vertex_data.dtype.names:
-        vertex_data["bone_weights"] = vertex_bone_weights
-    if "bone_indices" in vertex_data.dtype.names:
-        vertex_data["bone_indices"] = vertex_bone_indices
 
     command.operator.debug(f"Constructed combined vertex array in {time.perf_counter() - p} s.")
 
@@ -517,18 +568,9 @@ def _create_flver_meshes(
 
     loop_normals = np.empty((loop_count, 3), dtype=np.float32)
     tri_mesh_data.loops.foreach_get("normal", loop_normals.ravel())
-    if use_normal_w_bone_index:
-        # New Map Pieces: single vertex bone index is stored in `normal_w` (as `uint8`).
-        # TODO: Given that the default `normal_w` value in older games is 127, this may be signed, and so the max
-        #  Map Piece bone count may actually be 127/128. Sticking with 256 for now.
-        if (max_bone_index := vertex_bone_indices.max()) > 255:
-            raise FLVERExportError(
-                f"Map Piece mode only supports up to 256 bones (8-bit index), not: {max_bone_index}"
-            )
-        loop_normals_w = vertex_bone_indices[:, 0][loop_vertex_indices].astype(np.uint8).reshape(-1, 1)
-    else:
-        # Rigged models or old Map Pieces: `normal_w` is unused and defaults to 127.
-        loop_normals_w = np.full((loop_count, 1), 127, dtype=np.uint8)
+    # `normal_w` defaults to 127. For non-dynamic meshes on games that encode the bone index in `normal_w`,
+    # `MergedMesh.get_combined_loop_data()` derives the correct per-loop value from `bone_indices` at split time.
+    loop_normals_w = np.full((loop_count, 1), 127, dtype=np.uint8)
 
     if colors_layer_0:
         colors_layer_0.data.foreach_get("color", loop_color_arrays[0].ravel())
@@ -541,14 +583,14 @@ def _create_flver_meshes(
         uv_layer.data.foreach_get("uv", loop_uv_array_dict[uv_layer_name].ravel())
 
     # 5. Calculate individual tangent arrays for each UV layer that starts with `UVTexture`.
-    #  We also need to manually include `UVBloodMaskOrLightmap` for non-Map Pieces (Bloodborne) as the same slot is
-    #  used for Lightmaps by Map Pieces. (No better solution for this yet.)
+    #  UVBloodMaskOrLightmap is always included if present: on Bloodborne characters it carries the blood-mask
+    #  tangent (tangent_1), while on static meshes the layout has no second tangent slot so the array is unused.
 
     loop_tangent_arrays = []
     uv_texture_layer_names = sorted(
         [
             name for name in bl_uv_layer_names
-            if name.startswith("UVTexture") or (name == "UVBloodMaskOrLightmap" and not use_map_piece_layout)
+            if name.startswith("UVTexture") or name == "UVBloodMaskOrLightmap"
         ]
     )
     for uv_name in uv_texture_layer_names:
@@ -560,7 +602,7 @@ def _create_flver_meshes(
     # Assign second tangents array to bitangents in earlier games (DeS/DS1).
     # TODO: Not sure if DS2 uses bitangent field.
     # Bloodborne onwards properly use multiple tangent fields.
-    if command.settings.is_game("DEMONS_SOULS", "DARK_SOULS_PTDE", "DARK_SOULS_DSR"):
+    if command.settings.is_game(GameType.DemonsSouls, GameType.DarkSoulsPTDE, GameType.DarkSoulsDSR):
         # Early games only support up to two tangent arrays, and put the second in "bitangent" vertex array data.
         if len(loop_tangent_arrays) > 2:
             command.operator.warning(
@@ -575,35 +617,314 @@ def _create_flver_meshes(
 
     command.operator.debug(f"Constructed combined loop array in {time.perf_counter() - p} s.")
 
-    merged_mesh_kwargs = dict(
-        vertex_data=vertex_data,
-        loop_vertex_indices=loop_vertex_indices,
-        vertices_merged=True,
-        loop_normals=loop_normals,
-        loop_normals_w=loop_normals_w,
-        loop_tangents=loop_tangent_arrays,
-        loop_bitangents=loop_bitangents,
-        loop_vertex_colors=loop_color_arrays,
-        loop_uvs=loop_uv_array_dict,
-        faces=faces,
-    )
-
-    merged_mesh = MergedMesh(**merged_mesh_kwargs)
-
     # Apply Blender -> FromSoft transformations.
-    merged_mesh.swap_vertex_yz(tangents=True, bitangents=True)
-    merged_mesh.invert_vertex_uv(invert_u=False, invert_v=True)
+    # Swap vertex YZ.
+    vertex_positions = vertex_positions[:, [0, 2, 1]]
+    if loop_normals is not None:
+        loop_normals = loop_normals[:, [0, 2, 1]]
+    for i, tangent_array in enumerate(loop_tangent_arrays):
+        loop_tangent_arrays[i] = tangent_array[:, [0, 2, 1, 3]]
+    if loop_bitangents is not None:
+        loop_bitangents = loop_bitangents[:, [0, 2, 1, 3]]
+    # Invert UV V dimension (complement from 1).
+    for uv_layer_name in loop_uv_array_dict:
+        loop_uv_array_dict[uv_layer_name][:, 1] = 1.0 - loop_uv_array_dict[uv_layer_name][:, 1]
 
-    p = time.perf_counter()
-    command.flver.meshes = merged_mesh.split_mesh(
-        split_mesh_defs,
-        unused_bone_indices_are_minus_one=True,  # saves some time within the splitter (no ambiguous zeroes)
-        normal_tangent_dot_threshold=command.export_settings.normal_tangent_dot_max,
-        **command.settings.game_config.split_mesh_kwargs,
+    # Reverse the import-time bake of static (non-dynamic) mesh vertices into armature space. Modifies
+    # `vertex_positions`, `vertex_bone_weights`, `vertex_bone_indices`, and the loop direction arrays in place.
+    _unbake_static_vertices_to_bone_space(
+        command,
+        bl_bone_data_type=bl_bone_data_type,
+        split_mesh_def_kwargs=split_mesh_def_kwargs,
+        faces=faces,
+        loop_vertex_indices=loop_vertex_indices,
+        vertex_positions=vertex_positions,
+        vertex_bone_weights=vertex_bone_weights,
+        vertex_bone_indices=vertex_bone_indices,
+        loop_normals=loop_normals,
+        loop_tangent_arrays=loop_tangent_arrays,
+        loop_bitangents=loop_bitangents,
     )
+
+    if is_pyre_flver:
+        merged_mesh = pyre_flver.MergedMesh()
+        # Vertex data
+        merged_mesh.positions = vertex_positions
+        merged_mesh.bone_weights = vertex_bone_weights
+        merged_mesh.bone_indices = vertex_bone_indices
+        # Loop data
+        merged_mesh.loop_vertex_indices = loop_vertex_indices
+        merged_mesh.loop_normals = loop_normals
+        merged_mesh.loop_normals_w = loop_normals_w
+        merged_mesh.loop_tangents = loop_tangent_arrays
+        merged_mesh.loop_bitangents = loop_bitangents
+        merged_mesh.loop_vertex_colors = loop_color_arrays
+        merged_mesh.loop_uvs = loop_uv_array_dict
+        # Faces
+        merged_mesh.faces = faces
+
+        # Map game-specific split kwargs (soulstruct/Python naming) to `pyre_flver.SplitMeshParams` fields.
+        game_split_mesh_kwargs = command.settings.game_config.split_mesh_kwargs
+        split_mesh_params = pyre_flver.SplitMeshParams(
+            use_mesh_bone_indices=game_split_mesh_kwargs.get("use_mesh_bone_indices", True),
+            max_bones_per_mesh=game_split_mesh_kwargs.get("max_bones_per_mesh", 38),
+            unused_bone_indices_are_minus_one=True,  # saves some time within the splitter (no ambiguous zeroes)
+            normal_tangent_dot_threshold=command.export_settings.normal_tangent_dot_max,
+            max_vertices_per_mesh=game_split_mesh_kwargs.get("max_mesh_vertex_count", 0),
+            is_flver0=int(command.flver.version) <= 0xFFFF,
+        )
+
+        p = time.perf_counter()
+        command.flver.meshes = merged_mesh.split_mesh(split_mesh_defs, split_mesh_params)
+        command.operator.debug(
+            f"Split Blender mesh into {len(command.flver.meshes)} FLVER meshes in {time.perf_counter() - p} s "
+            f"(with pyrelink)."
+        )
+
+        # `pyre_flver.FLVER` has no `refresh_bone_bounding_boxes()`/`refresh_bounding_boxes()` equivalents (the
+        # C++ splitter already computes per-mesh bounding boxes, mirroring the Python splitter). We only need to
+        # compute the FLVER-wide bounding box and per-bone bounding boxes here, directly from the flat merged vertex
+        # arrays we already built above (rather than re-deriving them from the split `Mesh` objects).
+        # TODO: Move this into the C++ splitter or Firelink `FLVER`.
+        _refresh_pyrelink_bounding_boxes(
+            command.flver,
+            vertex_positions=vertex_positions,
+            vertex_bone_weights=vertex_bone_weights,
+            vertex_bone_indices=vertex_bone_indices,
+            in_local_space=bl_bone_data_type == FLVERBoneDataType.EDIT,
+        )
+    else:  # soulstruct FLVER
+
+        # Always include bone weights and indices. For static meshes on games that encode the single bone index
+        # in `normal_w`, `MergedMesh.get_combined_loop_data()` derives the correct per-loop value from `bone_indices`
+        # at split time -- so no special-casing is needed here.
+        vertex_data_dtype = [
+            ("position", "f", 3),  # TODO: support 4D position (see, e.g., Rykard slime in ER: c4711)
+            ("bone_weights", "f", 4),
+            ("bone_indices", "i", 4),
+        ]
+        vertex_data = np.empty(vertex_count, dtype=vertex_data_dtype)
+        vertex_data["position"] = vertex_positions
+        vertex_data["bone_weights"] = vertex_bone_weights
+        vertex_data["bone_indices"] = vertex_bone_indices
+
+        merged_mesh_loops = MergedMeshLoops(
+            normals=loop_normals,
+            normals_w=loop_normals_w,
+            tangents=loop_tangent_arrays,
+            bitangents=loop_bitangents,
+            vertex_colors=loop_color_arrays,
+            uvs=loop_uv_array_dict,
+            cloth_tangents=None,
+            cloth_bitangents=None,
+        )
+
+        merged_mesh = MergedMesh(
+            vertex_data=vertex_data,
+            loop_data=merged_mesh_loops,
+            loop_vertex_indices=loop_vertex_indices,
+            vertices_merged=True,
+            faces=faces,
+        )
+
+        p = time.perf_counter()
+        command.flver.meshes = merged_mesh.split_mesh(
+            split_mesh_defs,
+            unused_bone_indices_are_minus_one=True,  # saves some time within the splitter (no ambiguous zeroes)
+            normal_tangent_dot_threshold=command.export_settings.normal_tangent_dot_max,
+            **command.settings.game_config.split_mesh_kwargs,
+        )
+        command.operator.debug(
+            f"Split Blender mesh into {len(command.flver.meshes)} FLVER meshes in {time.perf_counter() - p} s "
+            f"(with Python)."
+        )
+
+
+def _unify_flver0_material_layouts(command: _CreateFLVERCommand, split_mesh_defs: list[SplitMeshDef]) -> None:
+    """Give every `SplitMeshDef` that shares a FLVER material the same vertex array layout, for FLVER0 games only.
+
+    FLVER0 (Demon's Souls) stores vertex array layouts *inside* each material, and every vanilla FLVER0 material has
+    exactly one. `MatDef.get_vertex_array_layout()` normally derives the layout from `is_dynamic`, which would give a
+    material used by both static and dynamic meshes (e.g. c2030's body, whose cloak mesh is static) two layouts once
+    the FLVER0 packer merges the identical materials -- a structure no vanilla FLVER0 has, and which Soulstruct
+    cannot read back. Vanilla instead gives such a material the dynamic layout and simply writes zero bone weights
+    for its static meshes, which is what we reproduce here.
+
+    Later FLVER2 games store layouts at FLVER level and freely use two for one material (e.g. DS1 object o0150), so
+    they are left alone.
+    """
+    if int(command.flver.version) > 0xFFFF:
+        return  # FLVER2: layouts are FLVER-wide, so one material may freely use several
+
+    dynamic_layouts = {}  # type: dict[int, VertexArrayLayout]
+    for split_mesh_def in split_mesh_defs:
+        if split_mesh_def.is_dynamic:
+            dynamic_layouts.setdefault(hash_material(split_mesh_def.material), split_mesh_def.layout)
+
+    for i, split_mesh_def in enumerate(split_mesh_defs):
+        if split_mesh_def.is_dynamic:
+            continue
+        dynamic_layout = dynamic_layouts.get(hash_material(split_mesh_def.material))
+        if dynamic_layout is not None and dynamic_layout != split_mesh_def.layout:
+            command.operator.debug(
+                f"Using dynamic vertex array layout for static FLVER0 mesh with material "
+                f"'{split_mesh_def.material.name}', which is also used by a dynamic mesh."
+            )
+            split_mesh_defs[i] = split_mesh_def._replace(layout=dynamic_layout)
+
+
+def _unbake_static_vertices_to_bone_space(
+    command: _CreateFLVERCommand,
+    bl_bone_data_type: FLVERBoneDataType,
+    split_mesh_def_kwargs: list[dict[str, tp.Any]],
+    faces: np.ndarray,
+    loop_vertex_indices: np.ndarray,
+    vertex_positions: np.ndarray,
+    vertex_bone_weights: np.ndarray,
+    vertex_bone_indices: np.ndarray,
+    loop_normals: np.ndarray | None,
+    loop_tangent_arrays: list[np.ndarray],
+    loop_bitangents: np.ndarray | None,
+) -> None:
+    """Transform vertices destined for static (non-dynamic) FLVER meshes from armature space back into the local
+    space of the single bone they are weighted to, and restore vanilla static vertex bone data (no weights, with the
+    single bone index repeated across all four slots).
+
+    This is the exact inverse of FLVER import's `_bake_static_vertices_to_armature_space()`: `EDIT` bone data means
+    the entire Blender mesh is in armature space, but FLVER meshes with `is_dynamic = False` must be written in
+    bone-local space. All given arrays are modified in place (all already in FromSoft coordinates).
+
+    Does nothing for `CUSTOM` bone data (map pieces, whose Blender vertices are already bone-local and posed by
+    PoseBones instead), for `OMITTED` bone data, or for FLVERs with no static materials at all.
+    """
+    if bl_bone_data_type != FLVERBoneDataType.EDIT:
+        return
+    static_material_indices = [i for i, kwargs in enumerate(split_mesh_def_kwargs) if not kwargs["is_dynamic"]]
+    if not static_material_indices:
+        return
+
+    static_face_mask = np.isin(faces[:, 3], static_material_indices)
+    if not np.any(static_face_mask):
+        return
+
+    static_vertex_mask = np.zeros(len(vertex_positions), dtype=bool)
+    static_vertex_mask[loop_vertex_indices[faces[static_face_mask][:, :3].ravel()]] = True
+
+    dynamic_vertex_mask = np.zeros(len(vertex_positions), dtype=bool)
+    dynamic_vertex_mask[loop_vertex_indices[faces[~static_face_mask][:, :3].ravel()]] = True
+    shared_vertex_indices = np.flatnonzero(static_vertex_mask & dynamic_vertex_mask)
+    if shared_vertex_indices.size > 0:
+        raise FLVERExportError(
+            f"{shared_vertex_indices.size} vertices in FLVER mesh '{command.mesh.name}' are used by faces with both "
+            f"static and dynamic materials, which cannot be exported (static and dynamic FLVER meshes store their "
+            f"vertices in different spaces). First offending Blender vertex indices: "
+            f"{shared_vertex_indices[:10].tolist()}"
+        )
+
+    multi_bone_vertex_indices = np.flatnonzero(
+        static_vertex_mask & (np.sum(vertex_bone_indices >= 0, axis=1) > 1)
+    )
+    if multi_bone_vertex_indices.size > 0:
+        raise FLVERExportError(
+            f"{multi_bone_vertex_indices.size} vertices in static (non-dynamic) FLVER meshes are weighted to more "
+            f"than one bone, which is not supported. First offending Blender vertex indices: "
+            f"{multi_bone_vertex_indices[:10].tolist()}"
+        )
+
+    bone_arma_transforms = BoneTree(command.flver).get_bone_armature_space_transforms()
+    static_bone_indices = vertex_bone_indices[:, 0]
+
+    for bone_index in np.unique(static_bone_indices[static_vertex_mask]):
+        translate, rotate, scale = bone_arma_transforms[int(bone_index)]
+        vertex_mask = static_vertex_mask & (static_bone_indices == bone_index)
+        # Inverse of `(scale * position) @ rotate.T + translate` (rotation matrix is orthonormal, so `R^-1 == R.T`).
+        vertex_positions[vertex_mask] = (
+            (vertex_positions[vertex_mask] - translate.data) @ rotate.data
+        ) / scale.data
+        loop_mask = vertex_mask[loop_vertex_indices]
+        if loop_normals is not None:
+            loop_normals[loop_mask] = loop_normals[loop_mask] @ rotate.data
+        for loop_tangents in loop_tangent_arrays:
+            # Fourth tangent component is a handedness sign, not a direction.
+            loop_tangents[loop_mask, :3] = loop_tangents[loop_mask, :3] @ rotate.data
+        if loop_bitangents is not None:
+            loop_bitangents[loop_mask, :3] = loop_bitangents[loop_mask, :3] @ rotate.data
+
+    # Match vanilla static mesh vertex data: no bone weights, with the single bone index repeated in all four slots.
+    vertex_bone_weights[static_vertex_mask] = 0.0
+    vertex_bone_indices[static_vertex_mask] = vertex_bone_indices[static_vertex_mask][:, 0:1]
+
     command.operator.debug(
-        f"Split Blender mesh into {len(command.flver.meshes)} FLVER meshes in {time.perf_counter() - p} s."
+        f"Un-baked {int(np.sum(static_vertex_mask))} static FLVER mesh vertices from armature into bone-local space."
     )
+
+
+def _refresh_pyrelink_bounding_boxes(
+    flver: pyre_flver.FLVER,
+    vertex_positions: np.ndarray,
+    vertex_bone_weights: np.ndarray,
+    vertex_bone_indices: np.ndarray,
+    in_local_space: bool,
+):
+    """Compute and assign the FLVER-wide bounding box and all bone bounding boxes for a `pyre_flver.FLVER`,
+    directly from the flat merged vertex arrays (already in FromSoft space) built in `_create_flver_meshes()`.
+
+    This is the pyrelink-side equivalent of soulstruct's `FLVER.refresh_bounding_boxes()` (FLVER-wide part only, as
+    mesh-level bounding boxes are already computed by the pyrelink C++ mesh splitter) and
+    `FLVER.refresh_bone_bounding_boxes()`.
+    """
+    # FLVER-wide bounding box.
+    if len(vertex_positions) > 0:
+        flver.bounding_box.min = pyre_core.Vector3(*vertex_positions.min(axis=0).tolist())
+        flver.bounding_box.max = pyre_core.Vector3(*vertex_positions.max(axis=0).tolist())
+    else:
+        flver.bounding_box.min = pyre_core.Vector3(SINGLE_MAX, SINGLE_MAX, SINGLE_MAX)
+        flver.bounding_box.max = pyre_core.Vector3(SINGLE_MIN, SINGLE_MIN, SINGLE_MIN)
+
+    if not flver.bones:
+        return
+
+    bone_count = len(flver.bones)
+    bone_mins = np.full((bone_count, 3), SINGLE_MAX)
+    bone_maxs = np.full((bone_count, 3), SINGLE_MIN)
+
+    bone_arma_translate_inv_rotates = None
+    if in_local_space:
+        # `BoneTree` only reads `name`/`translate`/`rotate`/`scale`/`bounding_box`/`usage_flags`/index fields, all of
+        # which `pyre_flver.Bone` exposes with identical names, so it can be built directly from pyrelink bones.
+        bone_tree = BoneTree(flver)
+        bone_arma_translate_inv_rotates = [
+            (translate, rotate.inverse())
+            for translate, rotate, _ in bone_tree.get_bone_armature_space_transforms()
+        ]
+
+    has_any_weights = bool(np.any(vertex_bone_weights > 0.0))
+
+    for bone_index in range(bone_count):
+        if has_any_weights:
+            used_vertex_indices = np.any(
+                (vertex_bone_indices == bone_index) & (vertex_bone_weights > 0.0), axis=1
+            )
+        else:
+            # No bone weights at all (e.g. Map Piece). Only the first (and only relevant) bone index matters.
+            used_vertex_indices = vertex_bone_indices[:, 0] == bone_index
+
+        if not np.any(used_vertex_indices):
+            continue  # bone unused; bounding box left as default (invalid) min/max
+
+        bone_vertex_positions = vertex_positions[used_vertex_indices]
+
+        if in_local_space:
+            arma_translate, inv_arma_rotate = bone_arma_translate_inv_rotates[bone_index]
+            bone_vertex_positions = bone_vertex_positions - arma_translate.data
+            bone_vertex_positions = bone_vertex_positions @ inv_arma_rotate.data.T
+
+        bone_mins[bone_index] = bone_vertex_positions.min(axis=0)
+        bone_maxs[bone_index] = bone_vertex_positions.max(axis=0)
+
+    for bone_index, bone in enumerate(flver.bones):
+        bone.bounding_box.min = pyre_core.Vector3(*bone_mins[bone_index].tolist())
+        bone.bounding_box.max = pyre_core.Vector3(*bone_maxs[bone_index].tolist())
 
 
 def _get_tangents_for_uv_layer(

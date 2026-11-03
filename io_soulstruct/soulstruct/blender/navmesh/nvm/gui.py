@@ -14,13 +14,14 @@ import bmesh
 import bpy
 
 from soulstruct.base.events.enums import NavmeshFlag
-from soulstruct.games import DEMONS_SOULS, DARK_SOULS_PTDE, DARK_SOULS_DSR
+from soulstruct.games import GameType
 
-from soulstruct.blender.bpy_base.panel import SoulstructPanel
-from soulstruct.blender.exceptions import SoulstructTypeError
-from soulstruct.blender.misc.misc_mesh import ApplyLocalMatrixToMesh
-from soulstruct.blender.types import *
-from soulstruct.blender.types import MeshObject
+from ...base.register import io_soulstruct_panel
+from ...bpy_base.panel import SoulstructPanel, smart_prop
+from ...exceptions import SoulstructTypeError
+from ...misc.misc_mesh import ApplyLocalMatrixToMesh
+from ...types import *
+from ...types import MeshObject
 
 from .import_operators import *
 from .export_operators import *
@@ -28,6 +29,7 @@ from .misc_operators import *
 from .types import BlenderNVM
 
 
+@io_soulstruct_panel
 class NVMNavmeshImportPanel(SoulstructPanel):
     bl_label = "NVM Navmesh Import"
     bl_idname = "NVM_PT_nvm_navmesh_import"
@@ -39,7 +41,7 @@ class NVMNavmeshImportPanel(SoulstructPanel):
     # noinspection PyUnusedLocal
     def draw(self, context):
         settings = context.scene.soulstruct_settings
-        if not settings.is_game(DEMONS_SOULS, DARK_SOULS_PTDE, DARK_SOULS_DSR):
+        if not settings.is_game(GameType.DemonsSouls, GameType.DarkSoulsPTDE, GameType.DarkSoulsDSR):
             self.layout.label(text="Game does not use NVM.")
             return
 
@@ -49,6 +51,7 @@ class NVMNavmeshImportPanel(SoulstructPanel):
         layout.operator(ImportAnyNVM.bl_idname, text="Import Any NVM")
 
 
+@io_soulstruct_panel
 class NVMNavmeshExportPanel(SoulstructPanel):
     bl_label = "NVM Navmesh Export"
     bl_idname = "NVM_PT_nvm_navmesh_export"
@@ -70,7 +73,7 @@ class NVMNavmeshExportPanel(SoulstructPanel):
             return
 
         layout = self.layout
-        layout.prop(settings, "auto_detect_export_map")
+        smart_prop(layout, settings, "auto_detect_export_map")
         if settings.auto_detect_export_map:
             self.draw_detected_map(context, layout, use_latest_version=True)
         else:
@@ -81,6 +84,7 @@ class NVMNavmeshExportPanel(SoulstructPanel):
         layout.operator(ExportNVMIntoAnyBinder.bl_idname)
 
 
+@io_soulstruct_panel
 class NVMNavmeshToolsPanel(SoulstructPanel):
     bl_label = "NVM Navmesh Tools"
     bl_idname = "NVM_PT_nvm_navmesh_tools"
@@ -151,7 +155,7 @@ def layout_selected_faces(bm: bmesh.types.BMesh, layout, context, selected_faces
         props = context.scene.navmesh_face_settings
         flag_box = layout.box()
         row = flag_box.row()
-        row.prop(props, "navmesh_flag")
+        smart_prop(row, props, "navmesh_flag")
         row = flag_box.row()
         row.operator(AddNVMFaceFlags.bl_idname, text="Add")
         row.operator(RemoveNVMFaceFlags.bl_idname, text="Remove")
@@ -160,7 +164,7 @@ def layout_selected_faces(bm: bmesh.types.BMesh, layout, context, selected_faces
         # Box and button to set obstacle count for selected faces.
         obstacle_box = layout.box()
         row = obstacle_box.row()
-        row.prop(props, "obstacle_count")
+        smart_prop(row, props, "obstacle_count")
         row = obstacle_box.row()
         row.operator(SetNVMFaceObstacleCount.bl_idname, text="Set Obstacle Count")
 
@@ -169,6 +173,7 @@ def layout_selected_faces(bm: bmesh.types.BMesh, layout, context, selected_faces
         selected_faces_box.label(text="Select navmesh faces in Edit Mode")
 
 
+@io_soulstruct_panel
 class NVMEventEntityTriangleUIList(bpy.types.UIList):
     """Draws a list of items."""
     PROP_NAME: tp.ClassVar[str] = "index"
@@ -190,13 +195,14 @@ class NVMEventEntityTriangleUIList(bpy.types.UIList):
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             row = layout.row()
             row.label(text=f"Triangle {index}:")
-            row.prop(item, self.PROP_NAME, text="", emboss=False)
+            smart_prop(row, item, self.PROP_NAME, text="", emboss=False)
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text=f"Triangle {index}:")
-            layout.prop(item, self.PROP_NAME, text="", emboss=False)
+            smart_prop(layout, item, self.PROP_NAME, text="", emboss=False)
 
 
+@io_soulstruct_panel
 class NVMEventEntityPanel(SoulstructPanel):
     """Draw a Panel in the Object properties window exposing NVM Event Entity properties for active object."""
     bl_label = "NVM Event Entity Settings"
@@ -219,7 +225,7 @@ class NVMEventEntityPanel(SoulstructPanel):
             return
 
         props = obj.NVM_EVENT_ENTITY
-        layout.prop(props, "entity_id")
+        smart_prop(layout, props, "entity_id")
 
         layout.label(text="Triangles:")
         row = layout.row()
@@ -235,4 +241,4 @@ class NVMEventEntityPanel(SoulstructPanel):
         col.operator(AddNVMEventEntityTriangleIndex.bl_idname, icon='ADD', text="")
         col.operator(RemoveNVMEventEntityTriangleIndex.bl_idname, icon='REMOVE', text="")
 
-        layout.prop(props, "triangle_indices")
+        smart_prop(layout, props, "triangle_indices")

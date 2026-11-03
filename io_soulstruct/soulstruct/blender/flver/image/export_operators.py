@@ -8,10 +8,14 @@ __all__ = [
 from pathlib import Path
 
 import bpy
+
 from soulstruct.containers import Binder
 from soulstruct.containers.tpf import TPF
 from soulstruct.dcx import DCXType
-from soulstruct.blender.utilities import *
+from soulstruct.games import GameType
+
+from ...base.operators import *
+from ...utilities import *
 from .types import *
 
 
@@ -26,7 +30,7 @@ def export_map_area_textures(
     TODO: When to use 'mAA_9999.tpf.dcx'? Never?
     """
     settings = operator.settings(context)
-    if not settings.is_game("DARK_SOULS_DSR"):
+    if not settings.is_game(GameType.DarkSoulsDSR):
         operator.error("Map textures not exported: only supported for Dark Souls: Remastered.")
         return []
 
@@ -181,7 +185,7 @@ class ExportTexturesIntoBinderOrTPF(LoggingImportOperator):
             if binder is not None:
                 for entry in binder.entries:
                     if entry.name.endswith((".tpf", ".tpf.dcx")):
-                        if entry.minimal_stem == dds_texture.stem:
+                        if entry.stem == dds_texture.stem:
                             # Found a single-texture TPF matching this texture stem. Replace in entry.
                             new_tpf = dds_texture.to_single_texture_tpf(
                                 self,
@@ -190,7 +194,7 @@ class ExportTexturesIntoBinderOrTPF(LoggingImportOperator):
                             )
                             entry.set_from_binary_file(new_tpf)
                             break
-                        elif entry.minimal_stem == binder.path_minimal_stem:
+                        elif entry.stem == binder.path_minimal_stem:
                             # Found a multi-texture TPF. Treat as target TPF.
                             target_tpf = entry.to_binary_file(TPF)
                 else:

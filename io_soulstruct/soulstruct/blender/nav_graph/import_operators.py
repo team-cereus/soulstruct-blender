@@ -23,14 +23,17 @@ import bpy
 
 from soulstruct.base.maps.navmesh import MCG, MCP, NavmeshAABB
 
-from soulstruct.blender.exceptions import NavGraphMissingNavmeshError
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..exceptions import NavGraphMissingNavmeshError
+from ..utilities import *
 from .types import BlenderMCG
 
 if tp.TYPE_CHECKING:
-    from soulstruct.blender.type_checking import *
+    from ..type_checking import *
 
 
+@io_soulstruct_operator
 class ImportAnyMCG(LoggingImportOperator):
     bl_idname = "import_scene.mcg"
     bl_label = "Import Any MCG"
@@ -102,6 +105,7 @@ class ImportAnyMCG(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ImportMapMCG(LoggingOperator):
     bl_idname = "import_scene.map_mcg"
     bl_label = "Import Map MCG"
@@ -165,6 +169,7 @@ class ImportMapMCG(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ImportAnyMCP(LoggingImportOperator):
     bl_idname = "import_scene.mcp"
     bl_label = "Import Any MCP"
@@ -197,6 +202,7 @@ class ImportAnyMCP(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ImportMapMCP(LoggingOperator):
     bl_idname = "import_scene.map_mcp"
     bl_label = "Import Map MCP"

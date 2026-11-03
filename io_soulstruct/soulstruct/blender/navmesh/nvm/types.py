@@ -13,12 +13,15 @@ import bmesh
 import bpy
 from mathutils import Vector
 
+from soulstruct.base.events.enums import NavmeshFlag
 from soulstruct.base.maps.navmesh.nvm import *
+from soulstruct.games import GameType
 
-from soulstruct.blender.base import BaseBlenderSoulstructObject
-from soulstruct.blender.exceptions import NVMExportError
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ...base.operators import *
+from ...base.soulstruct_object import BaseBlenderSoulstructObject
+from ...exceptions import NVMExportError
+from ...types import *
+from ...utilities import *
 from .properties import *
 from .utilities import set_face_material
 
@@ -41,7 +44,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
         context: bpy.types.Context,
         soulstruct_obj: NVM,
         name: str,
-        collection: bpy.types.Collection = None,
+        collection: bpy.types.Collection | None = None,
     ) -> BlenderNVM:
         operator.to_object_mode(context)
         operator.deselect_all()
@@ -67,7 +70,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
             face[flags_layer] = nvm_triangle.flags
             face[obstacle_count_layer] = nvm_triangle.obstacle_count
 
-        bl_nvm = cls.new(name, data=mesh, collection=collection)  # type: BlenderNVM
+        bl_nvm = tp.cast(tp.Self, cls.new(name, data=mesh, collection=collection))
 
         for nvm_event in nvm.event_entities:
             # Get the average position of the faces. This is purely for show and is not exported.
@@ -102,6 +105,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
         We do not do any triangulation here; the NVM model should already be triangulated exactly as desired, as the
         triangles actually matter for navigation.
         """
+        settings = context.scene.soulstruct_settings
         mesh_data = self.obj.data
         nvm_verts = np.array([vert.co for vert in mesh_data.vertices], dtype=np.float32)
         # Swap Y and Z coordinates.
@@ -116,29 +120,6 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
             # noinspection PyTypeChecker
             vertices = tuple(face.vertices)  # type: tuple[int, int, int]
             nvm_faces.append(vertices)
-
-        def find_connected_face_index(edge_v1: int, edge_v2: int, not_face) -> int:
-            """Find face that shares an edge with the given edge.
-
-            Returns -1 if no connected face is found (i.e. edge is on the edge of the mesh).
-            """
-            # TODO: Could surely iterate over faces just once for this?
-            for i_, f_ in enumerate(nvm_faces):
-                if f_ != not_face and edge_v1 in f_ and edge_v2 in f_:  # order doesn't matter
-                    return i_
-            return -1
-
-        # Get connected faces along each edge of each face.
-        nvm_connected_face_indices = []  # type: list[tuple[int, int, int]]
-        for face in nvm_faces:
-            connected_v1 = find_connected_face_index(face[0], face[1], face)
-            connected_v2 = find_connected_face_index(face[1], face[2], face)
-            connected_v3 = find_connected_face_index(face[2], face[0], face)
-            nvm_connected_face_indices.append((connected_v1, connected_v2, connected_v3))
-            if connected_v1 == -1 and connected_v2 == -1 and connected_v3 == -1:
-                operator.warning(
-                    f"NVM face {face} in '{self.name}' appears to have no connected faces, which is very suspicious!"
-                )
 
         # Create `BMesh` to access custom face layers for `flags` and `obstacle_count`.
         bm = bmesh.new()
@@ -161,6 +142,34 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
         if len(nvm_flags) != len(nvm_faces):
             raise ValueError("NVM mesh has different number of `Mesh` faces and `BMesh` face flags.")
 
+        def find_connected_face_index(edge_v1: int, edge_v2: int, not_face) -> int:
+            """Find face that shares an edge with the given edge.
+
+            Returns -1 if no connected face is found (i.e. edge is on the edge of the mesh).
+            """
+            # TODO: Could surely iterate over faces just once for this?
+            for i_, f_ in enumerate(nvm_faces):
+                if f_ != not_face and edge_v1 in f_ and edge_v2 in f_:  # order doesn't matter
+                    return i_
+            return -1
+
+        # Get connected faces along each edge of each face.
+        nvm_connected_face_indices = []  # type: list[tuple[int, int, int]]
+        for i, face in enumerate(nvm_faces):
+            connected_v1 = find_connected_face_index(face[0], face[1], face)
+            connected_v2 = find_connected_face_index(face[1], face[2], face)
+            connected_v3 = find_connected_face_index(face[2], face[0], face)
+            nvm_connected_face_indices.append((connected_v1, connected_v2, connected_v3))
+
+            # Warn if a non-degenerate face has no connections.
+            is_degenerate = (nvm_flags[i] & NavmeshFlag.Degenerate) != 0
+            if not is_degenerate and connected_v1 == -1 and connected_v2 == -1 and connected_v3 == -1:
+                flag_str = " | ".join([n.name for n in NavmeshFlag if n.value & nvm_flags[i]]) or "Default"
+                operator.warning(
+                    f"Non-degenerate NVM face {face} in '{self.name}' has no connected faces (unusual but "
+                    f"does occur in a few vanilla files). Flags: {flag_str}"
+                )
+
         nvm_triangles = [
             NVMTriangle(
                 vertex_indices=nvm_faces[i],
@@ -176,7 +185,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
             for nvm_event_entity in self.get_nvm_event_entities()
         ]
 
-        big_endian = context.scene.soulstruct_settings.is_game("DEMONS_SOULS")
+        big_endian = settings.is_game(GameType.DemonsSouls)
 
         nvm = NVM(
             big_endian=big_endian,
@@ -194,14 +203,14 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
             set_face_material(mesh_data, bl_tri, nvm_triangle.flags)
 
     def create_nvm_quadtree(
-        self, context: bpy.types.Context, nvm: NVM, model_name: str, collection: bpy.types.Collection = None
+        self, context: bpy.types.Context, nvm: NVM, model_name: str, collection: bpy.types.Collection | None = None
     ) -> list[bpy.types.Object]:
         """Create box tree (depth first creation order).
 
         NOTE: These boxes should be imported for inspection only. They are automatically generated from the mesh
         min/max vertex coordinates on NVM export and have no properties.
         """
-        collection = collection or context.scene.collection
+        collection = resolve_collection(context, collection)
         boxes = []
         for i, (box, indices) in enumerate(nvm.get_all_boxes(nvm.root_box)):
             if not indices:
@@ -216,7 +225,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
             bl_box.parent = self.obj
         return boxes
 
-    def duplicate(self, collections: tp.Sequence[bpy.types.Collection] = None) -> BlenderNVM:
+    def duplicate(self, collections: tp.Sequence[bpy.types.Collection] = ()) -> BlenderNVM:
         """Duplicate Navmesh model to a new object. Does not rename (will just add duplicate suffix)."""
         new_model = new_mesh_object(self.name, self.data.copy())
         new_model.soulstruct_type = SoulstructType.NAVMESH
@@ -250,7 +259,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
         return remove_dupe_suffix(self.obj.name).split(" ")[0].split(".")[0].strip()
 
     @staticmethod
-    def create_box(context: bpy.types.Context, box: NVMBox, index: int):
+    def create_box(context: bpy.types.Context, box: NVMBox, index: int) -> MeshObject:
         """Create an AABB prism representing `box`. Position is baked into mesh data fully, just like the navmesh."""
         start_vec = to_blender(box.start_corner)
         end_vec = to_blender(box.end_corner)
@@ -258,6 +267,7 @@ class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
         bl_box = context.active_object
         # noinspection PyTypeChecker
         box_data = bl_box.data  # type: bpy.types.Mesh
+        bl_box: MeshObject
         for vertex in box_data.vertices:
             vertex.co[0] = start_vec.x if vertex.co[0] == -1.0 else end_vec.x
             vertex.co[1] = start_vec.y if vertex.co[1] == -1.0 else end_vec.y
@@ -301,10 +311,10 @@ class BlenderNVMEventEntity(BaseBlenderSoulstructObject[NVMEventEntity, NVMEvent
         context: bpy.types.Context,
         soulstruct_obj: NVMEventEntity,
         name: str,
-        collection: bpy.types.Collection = None,
-        location: Vector = None,
+        collection: bpy.types.Collection | None = None,
+        location: Vector | None = None,
     ) -> BlenderNVMEventEntity:
-        bl_event = cls.new(name, data=None, collection=collection)  # type: BlenderNVMEventEntity
+        bl_event = tp.cast(tp.Self, cls.new(name, data=None, collection=collection))
         bl_event.obj.empty_display_type = "CUBE"  # to distinguish it from node spheres
 
         bl_event.obj.location = location or Vector()

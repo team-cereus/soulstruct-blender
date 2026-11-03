@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 import bpy
 
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ....base.operators import *
+from ....types import *
+from ....utilities import *
 
 if tp.TYPE_CHECKING:
     from soulstruct.base.maps.msb import MSB as BaseMSB

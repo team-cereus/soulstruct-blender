@@ -13,8 +13,8 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.blender.flver.models.operators.import_operators import ImportEquipmentFLVER
-from soulstruct.blender.general.weapon_names import get_weapon_index
+from ..flver.models.operators.import_operators import ImportEquipmentFLVER
+from ..general.weapon_names import get_weapon_index
 
 from .debug_log import stan_debug, stan_info, stan_warning
 from .equip_weapon_param import get_weapon_row
@@ -23,6 +23,7 @@ from .unequip_weapon import unequip_active_weapon
 from .weapon_attach import attach_weapon_to_player
 from .weapon_import import import_weapon_partsbnd
 from .weapon_preview_body import _iter_parts_directories
+from ..base.register import io_soulstruct_operator
 
 _PARTS_BND_RE = re.compile(r"^(WP_A_\d{4})\.partsbnd(\.dcx)?(\.bak)?$", re.IGNORECASE)
 
@@ -99,6 +100,7 @@ def build_weapon_search_items(context: bpy.types.Context) -> list[tuple[str, str
     return items
 
 
+@io_soulstruct_operator
 class StanSearchWeaponToImport(ImportEquipmentFLVER):
     """Import weapon FLVER by EquipParamWeapon row id (Stan's Tools)."""
 

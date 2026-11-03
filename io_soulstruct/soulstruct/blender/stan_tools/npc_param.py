@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import bpy
 
 if TYPE_CHECKING:
-    from soulstruct.blender.general.properties import SoulstructSettings
+    from ..general.properties import SoulstructSettings
 
 DRAW_MASK_COUNT = 32
 _MASK_FIELD_RE = re.compile(r"^modelDisp(?:lay)?Mask(\d+)$", re.IGNORECASE)

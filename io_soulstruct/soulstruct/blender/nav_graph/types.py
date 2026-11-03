@@ -14,11 +14,12 @@ from soulstruct.base.maps.navmesh import MCG, MCGNode
 from soulstruct.base.maps.navmesh import MCGEdge
 from soulstruct.utilities.text import natural_keys
 
-from soulstruct.blender.base import BaseBlenderSoulstructObject
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.navmesh.nvm.types import BlenderNVM
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..base.soulstruct_object import BaseBlenderSoulstructObject
+from ..exceptions import *
+from ..navmesh.nvm.types import BlenderNVM
+from ..types import *
+from ..utilities import *
 from .properties import *
 
 
@@ -85,7 +86,7 @@ class BlenderMCG(BaseBlenderSoulstructObject[MCG, MCGProps]):
         cls,
         name: str,
         data: bpy.types.Mesh | None,
-        collection: bpy.types.Collection = None,
+        collection: bpy.types.Collection | None = None,
     ) -> tp.Self:
         """Creates Nodes and Edges child-parents."""
         match cls.BL_OBJ_TYPE:
@@ -120,9 +121,9 @@ class BlenderMCG(BaseBlenderSoulstructObject[MCG, MCGProps]):
         context: bpy.types.Context,
         soulstruct_obj: MCG,
         name: str,
-        collection: bpy.types.Collection = None,
-        navmesh_part_names: list[str] = None,
-    ) -> BlenderMCG:
+        collection: bpy.types.Collection | None = None,
+        navmesh_part_names: list[str] | None = None,
+    ) -> tp.Self:
         if not navmesh_part_names:
             raise ValueError("`navmesh_part_names` must be provided.")
 
@@ -143,7 +144,7 @@ class BlenderMCG(BaseBlenderSoulstructObject[MCG, MCGProps]):
         operator.to_object_mode(context)
         operator.deselect_all()
 
-        bl_mcg = cls.new(name, data=None, collection=collection)  # type: BlenderMCG
+        bl_mcg = tp.cast(tp.Self, cls.new(name, data=None, collection=collection))
 
         # Actual MCG binary file stores navmesh node triangle indices for every edge, which is extremely redundant, as
         # every node touches exactly two navmeshes and its connected edges in each of those two navmeshes always use
@@ -215,7 +216,7 @@ class BlenderMCG(BaseBlenderSoulstructObject[MCG, MCGProps]):
         self,
         operator: LoggingOperator,
         context: bpy.types.Context,
-        navmesh_part_indices: dict[str, int] = None,
+        navmesh_part_indices: dict[str, int] | None = None,
     ) -> MCG:
         """Create MCG from Blender nodes and edges.
 
@@ -365,10 +366,10 @@ class BlenderMCGNode(BaseBlenderSoulstructObject[MCGNode, MCGNodeProps]):
         context: bpy.types.Context,
         soulstruct_obj: MCGNode,
         name: str,
-        collection: bpy.types.Collection = None,
-        navmesh_part_names: list[str] = None,
-        triangle_indices: dict[str, None | tuple[int, list[int]]] = None,
-    ) -> BlenderMCGNode:
+        collection: bpy.types.Collection | None = None,
+        navmesh_part_names: list[str] | None = None,
+        triangle_indices: dict[str, None | tuple[int, list[int]]] | None = None,
+    ) -> tp.Self:
         if not navmesh_part_names:
             raise ValueError("`navmesh_part_names` must be provided.")
         if not triangle_indices:
@@ -376,7 +377,7 @@ class BlenderMCGNode(BaseBlenderSoulstructObject[MCGNode, MCGNodeProps]):
 
         node = soulstruct_obj
 
-        bl_node = cls.new(name, data=None, collection=collection)  # type: BlenderMCGNode
+        bl_node = tp.cast(tp.Self, cls.new(name, data=None, collection=collection))
         bl_node.obj.empty_display_type = "SPHERE"
         bl_node.obj.location = to_blender(soulstruct_obj.translate)
 
@@ -425,8 +426,8 @@ class BlenderMCGNode(BaseBlenderSoulstructObject[MCGNode, MCGNodeProps]):
         self,
         operator: LoggingOperator,
         context: bpy.types.Context,
-        navmesh_nodes: dict[str, list[MCGNode]] = None,
-        node_navmesh_info: dict[str, list[int]] = None,
+        navmesh_nodes: dict[str, list[MCGNode]] | None = None,
+        node_navmesh_info: dict[str, list[int]] | None = None,
     ) -> MCGNode:
         node = MCGNode(
             translate=to_game(self.location),
@@ -437,36 +438,28 @@ class BlenderMCGNode(BaseBlenderSoulstructObject[MCGNode, MCGNodeProps]):
         if node_navmesh_info is None:
             node_navmesh_info = {}
 
-        # Get navmesh A (must ALWAYS be present).
-        if self.navmesh_a is None:
+        def collect_node_info(_navmesh: MeshObject, _navmesh_triangles: list[int]) -> None:
+            navmesh_name = _navmesh.name  # type: str
+            node_navmesh_info[navmesh_name] = _navmesh_triangles
+            if navmesh_nodes is not None:
+                try:
+                    _navmesh_nodes = navmesh_nodes[navmesh_name]
+                except KeyError:
+                    raise KeyError(f"Navmesh '{navmesh_name}' not found in `navmesh_nodes`.")
+                _navmesh_nodes.append(node)
+
+        if navmesh_a := self.navmesh_a is None:
             raise NavGraphExportError(f"Node '{self.name}' does not have Navmesh A set.")
-        navmesh_a_name = self.navmesh_a.name  # type: str
-        navmesh_a_triangles = self.navmesh_a_triangles
-        node_navmesh_info[navmesh_a_name] = navmesh_a_triangles
-        if navmesh_nodes is not None:
-            try:
-                navmesh_a_nodes = navmesh_nodes[navmesh_a_name]
-            except KeyError:
-                raise KeyError(f"Navmesh A '{navmesh_a_name}' not found in `navmesh_nodes`.")
-            navmesh_a_nodes.append(node)
-
-        if self.navmesh_b is None:
+        if navmesh_b := self.navmesh_b is None:
             raise NavGraphExportError(f"Node '{self.name}' does not have Navmesh B set.")
-        navmesh_b_name = self.navmesh_b.name  # type: str
-        navmesh_b_triangles = self.navmesh_b_triangles
-        node_navmesh_info[navmesh_b_name] = navmesh_b_triangles
-        if navmesh_nodes is not None:
-            try:
-                navmesh_b_nodes = navmesh_nodes[navmesh_b_name]
-            except KeyError:
-                raise KeyError(f"Navmesh B '{navmesh_b_name}' not found in `navmesh_nodes`.")
-            navmesh_b_nodes.append(node)
-
-        if not navmesh_a_triangles and not navmesh_b_triangles:
+        if not self.navmesh_a_triangles and not self.navmesh_b_triangles:
             raise NavGraphExportError(
                 f"Node '{self.name}' does not have any triangles set for Navmesh A or B. One of them is "
                 f"permitted to be missing, if that navmesh is a dead end, but not both."
             )
+
+        collect_node_info(navmesh_a, self.navmesh_a_triangles)
+        collect_node_info(navmesh_b, self.navmesh_b_triangles)
 
         return node
 
@@ -518,12 +511,12 @@ class BlenderMCGEdge(BaseBlenderSoulstructObject[MCGEdge, MCGEdgeProps]):
         context: bpy.types.Context,
         soulstruct_obj: MCGEdge,
         name: str,
-        collection: bpy.types.Collection = None,
+        collection: bpy.types.Collection | None = None,
         navmesh_name="",
-        node_a: bpy.types.Object = None,
-        node_b: bpy.types.Object = None,
-    ) -> BlenderMCGEdge:
-        bl_edge = cls.new(name, data=None, collection=collection)  # type: BlenderMCGEdge
+        node_a: bpy.types.Object | None = None,
+        node_b: bpy.types.Object | None = None,
+    ) -> tp.Self:
+        bl_edge = tp.cast(tp.Self, cls.new(name, data=None, collection=collection))
         bl_edge.obj.empty_display_type = "PLAIN_AXES"
         bl_edge.obj.location = (node_a.location + node_b.location) / 2.0
         # Point empty arrow in direction of edge.
@@ -545,11 +538,11 @@ class BlenderMCGEdge(BaseBlenderSoulstructObject[MCGEdge, MCGEdgeProps]):
         self,
         operator: LoggingOperator,
         context: bpy.types.Context,
-        navmesh_part_indices: dict[str, int] = None,
-        node_navmesh_triangles: list[dict[str, list[int]]] = None,
-        node_indices: dict[str, int] = None,
-        nodes: list[MCGNode] = None,
-        map_id: tuple[int, int, int, int] = None,
+        navmesh_part_indices: dict[str, int] | None = None,
+        node_navmesh_triangles: list[dict[str, list[int]]] | None = None,
+        node_indices: dict[str, int] | None = None,
+        nodes: list[MCGNode] | None = None,
+        map_id: tuple[int, int, int, int] | None = None,
     ) -> MCGEdge:
         """Lots of existing node/triangle data from full `MCG` export required here.
 
@@ -575,9 +568,9 @@ class BlenderMCGEdge(BaseBlenderSoulstructObject[MCGEdge, MCGEdgeProps]):
             raise ValueError("`map_id` must be provided to export `MCGEdge`.")
 
         edge = MCGEdge(map_id=map_id, cost=self.cost)
-        if not self.navmesh_part:
+        if not (navmesh_part := self.navmesh_part):
             raise NavGraphExportError(f"Edge '{self.name}' does not have a Navmesh Part set.")
-        navmesh_part_name = BlenderNVM(self.navmesh_part).game_name
+        navmesh_part_name = BlenderNVM(navmesh_part).game_name
         try:
             navmesh_index = navmesh_part_indices[navmesh_part_name]
         except KeyError:
@@ -586,14 +579,14 @@ class BlenderMCGEdge(BaseBlenderSoulstructObject[MCGEdge, MCGEdgeProps]):
             )
         edge.navmesh_index = navmesh_index
 
-        if not self.node_a:
+        if not (node_a := self.node_a):
             raise NavGraphExportError(f"Edge '{self.name}' does not have a Node A set.")
-        if not self.node_b:
+        if not (node_b := self.node_b):
             raise NavGraphExportError(f"Edge '{self.name}' does not have a Node B set.")
 
         # Strip down node names to match dictionary keys.
-        node_a_name = _get_node_name_stem(self.node_a)
-        node_b_name = _get_node_name_stem(self.node_b)
+        node_a_name = _get_node_name_stem(node_a)
+        node_b_name = _get_node_name_stem(node_b)
 
         try:
             node_a_index = node_indices[node_a_name]

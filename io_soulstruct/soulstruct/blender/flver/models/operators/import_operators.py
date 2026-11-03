@@ -21,38 +21,53 @@ __all__ = [
     "ImportFLVER",
     "ImportMapPieceFLVER",
     "ImportCharacterFLVER",
+    "ImportPlayerFLVER",
     "ImportObjectFLVER",
     "ImportAssetFLVER",
     "ImportEquipmentFLVER",
+    "ImportArmorSetFLVERs",
 ]
 
 import re
+from dataclasses import dataclass
+
 import time
-import traceback
+import typing as tp
 from pathlib import Path
 
 import bpy
-import bpy.ops
 
-from soulstruct.flver import FLVERVersion, FLVER
-from soulstruct.containers import Binder
-from soulstruct.demonssouls.constants import CHARACTER_MODELS as DES_CHARACTER_MODELS
+from soulstruct.bloodborne.constants import CHARACTER_MODELS as BB_CHARACTER_MODELS
 from soulstruct.darksouls1ptde.constants import CHARACTER_MODELS as DS1_CHARACTER_MODELS
+from soulstruct.demonssouls.constants import CHARACTER_MODELS as DES_CHARACTER_MODELS
 from soulstruct.eldenring.constants import CHARACTER_MODELS as ER_CHARACTER_MODELS
+from soulstruct.flver import *
+from soulstruct.games import GameType
 
-from soulstruct.blender.flver.image.image_import_manager import ImageImportManager
-from soulstruct.blender.flver.utilities import *
-from soulstruct.blender.general import SoulstructSettings
-from soulstruct.blender.types import ArmatureObject
-from soulstruct.blender.utilities import *
+import pyrelink.core as pyre
+
+from ....base.operators import *
+from ....base.register import io_soulstruct_operator
+from ....exceptions import FLVERImportError
+from ....general import SoulstructSettings
+from ....types import ArmatureObject, ObjectType, SoulstructType
+from ....utilities import *
+from ...image.image_import_manager import ImageImportManager
 from ..types import BlenderFLVER
-from ..properties import FLVERImportSettings
 
 
 FLVER_BINDER_RE = re.compile(r"^.*?\.(.*bnd)(\.dcx)?$")
 
 
-class BaseFLVERImportOperator(LoggingImportOperator):
+@dataclass(slots=True)
+class FLVERSourceInfo:
+    source_path: Path
+    bl_name: str
+    flver_bytes: bytes
+    flver: FLVER | None = None
+
+
+class _BaseFLVERImportOperator(LoggingImportOperator):
 
     def draw(self, context):
         import_settings = context.scene.flver_import_settings
@@ -64,71 +79,57 @@ class BaseFLVERImportOperator(LoggingImportOperator):
 
         p = time.perf_counter()
 
-        flvers = []  # type: list[tuple[str, FLVER]]  # holds `(bl_name, flver)` pairs
-        image_import_manager = ImageImportManager(self, context)
+        settings = self.settings(context)
 
-        import_settings = context.scene.flver_import_settings
-        use_matbinbnd = False  # auto-set if first FLVER is from Sekiro/Elden Ring
+        flver_path_sources = {}  # type: dict[str, Path]
+        flver_binder_sources = {}  # type: dict[str, tuple[pyre.BinderEntry, pyre.Binder]]
 
         for source_path in self.file_paths:
 
             if FLVER_BINDER_RE.match(source_path.name):
                 # NOTE: Will always import all FLVERs found in Binder.
-                binder = Binder.from_path(source_path)
-                binder_flvers = get_flvers_from_binder(binder, source_path, allow_multiple=True)
-                if import_settings.import_textures:
-                    image_import_manager.find_flver_textures(source_path, binder)
-                    for flver in binder_flvers:
-                        self.find_extra_textures(source_path, flver, image_import_manager)
-                for flver in binder_flvers:
-                    # TODO: Sekiro does NOT use MATBIN, so this test needs to change.
-                    #  Unsure if there is a way to generically distinguish these FLVER files, though.
-                    #  Also, does AC6+ use MATBINBND?
-                    if flver.version.uses_matbin():
-                        use_matbinbnd = True
-                    flvers.append((flver.path_minimal_stem, flver))
+                binder = pyre.Binder.from_path(source_path)
+
+                flver_entries = binder.find_entries_by_name_regex(r".*\.flver(\.dcx)?")
+                if not flver_entries:
+                    raise FLVERImportError(f"Cannot find a FLVER file in binder {source_path}.")
+
+                for entry in flver_entries:
+                    flver_name = entry.stem
+                    flver_binder_sources[flver_name] = (entry, binder)
             else:  # e.g. loose Map Piece FLVER
-                flver = FLVER.from_path(source_path)
-                if import_settings.import_textures:
-                    image_import_manager.find_flver_textures(source_path)
-                    self.find_extra_textures(source_path, flver, image_import_manager)
-                flvers.append((source_path.name.split(".")[0], flver))
+                if ".flver" not in source_path.name:
+                    self.warning(f"Unusual non-Binder FLVER path: {source_path}. Will try to read as FLVER.")
+                flver_name = source_path.name.split(".")[0]
+                flver_path_sources[flver_name] = source_path
 
-        if use_matbinbnd:
-            self.info("Using MATBINBND (FLVER is Elden Ring or newer).")
-        else:
-            self.info("Using MTDBND (FLVER is pre-Elden Ring).")
+        self.info(
+            f"Extracted {len(flver_binder_sources)} FLVERs from Binders and {len(flver_path_sources)} FLVERs from "
+            f"direct file paths in {time.perf_counter() - p:.3f} s."
+        )
 
-        settings = self.settings(context)
         collection = self.get_collection(context, Path(self.directory).name)
 
-        bl_flver = None
-        for bl_name, flver in flvers:
+        p = time.perf_counter()
 
-            if not flver.meshes:
-                self.warning(f"FLVER '{bl_name}' has no meshes (skeleton-only).")
+        bl_flvers = BlenderFLVER.new_batch_from_soulstruct_objs(
+            self,
+            context,
+            flver_path_sources,
+            flver_binder_sources,
+            texture_finder_callback=None,
+            flver_model_category="",
+            collection=collection,
+        )
 
-            try:
-                bl_flver = BlenderFLVER.new_from_soulstruct_obj(
-                    self,
-                    context,
-                    flver,
-                    name=bl_name,
-                    image_import_manager=image_import_manager,
-                    collection=collection,
-                )
-            except Exception as ex:
-                # Delete any objects created prior to exception.
-                traceback.print_exc()  # for inspection in Blender console
-                return self.error(f"Cannot import FLVER: {bl_name}. Error: {ex}")
+        for bl_flver in bl_flvers.values():
+            self.post_process_flver(context, settings, bl_flver)
 
-            self.post_process_flver(context, settings, import_settings, bl_flver)
-
-        self.info(f"Imported {len(flvers)} FLVER(s) in {time.perf_counter() - p:.3f} s.")
+        self.info(f"Loaded {len(bl_flvers)} FLVERs into Blender in {time.perf_counter() - p:.3f} s.")
 
         # Select and frame view on (final) newly imported Mesh.
-        if bl_flver:
-            self.set_active_obj(bl_flver.mesh)
+        if bl_flvers and bpy.ops.view3d.view_selected.poll():
+            self.set_active_obj(next(iter(bl_flvers.values())).mesh)
             bpy.ops.view3d.view_selected(use_all_regions=False)
 
         return {"FINISHED"}
@@ -137,9 +138,8 @@ class BaseFLVERImportOperator(LoggingImportOperator):
         self,
         context: bpy.types.Context,
         settings: SoulstructSettings,
-        import_settings: FLVERImportSettings,
         bl_flver: BlenderFLVER,
-    ):
+    ) -> None:
         """Can be overridden to modify new FLVER model."""
         pass
 
@@ -148,7 +148,10 @@ class BaseFLVERImportOperator(LoggingImportOperator):
         return context.view_layer.active_layer_collection.collection
 
     def find_extra_textures(self, flver_source_path: Path, flver: FLVER, image_import_manager: ImageImportManager):
-        """Can be overridden by importers for specific FLVER model types that know where their textures are."""
+        """Can be overridden by importers for specific FLVER model types that know where their textures are.
+
+        TODO: Characters can also use object textures from maps they expect to appear in, e.g. DS1 Giant steel ball.
+        """
         pass
 
     def set_blender_parent(self, context, bl_flver_armature: ArmatureObject):
@@ -156,7 +159,8 @@ class BaseFLVERImportOperator(LoggingImportOperator):
         pass
 
 
-class ImportFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportFLVER(_BaseFLVERImportOperator):
     """This appears in the tooltip of the operator and in the generated docs."""
     bl_idname = "import_scene.flver"
     bl_label = "Import FLVER"
@@ -175,7 +179,8 @@ class ImportFLVER(BaseFLVERImportOperator):
 
 # region Game Folder Importers
 
-class ImportMapPieceFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportMapPieceFLVER(_BaseFLVERImportOperator):
     """Import a map piece FLVER from selected game map directory."""
     bl_idname = "import_scene.map_piece_flver"
     bl_label = "Import Map Piece"
@@ -222,7 +227,8 @@ class ImportMapPieceFLVER(BaseFLVERImportOperator):
         image_import_manager.register_lazy_flver_map_textures(map_dir, flver)
 
 
-class ImportCharacterFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportCharacterFLVER(_BaseFLVERImportOperator):
     """Shortcut for browsing for CHRBND Binders in game 'chr' directory."""
     bl_idname = "import_scene.character_flver"
     bl_label = "Import Character"
@@ -254,12 +260,14 @@ class ImportCharacterFLVER(BaseFLVERImportOperator):
         model_name = "<N/A>"
         if model_stem:
             settings = self.settings(context)
-            if settings.is_game_ds1():
+            if settings.is_game(GameType.Bloodborne):
+                model_name = BB_CHARACTER_MODELS.get(model_stem, "<Unknown>")
+            elif settings.is_game_ds1():
                 model_name = DS1_CHARACTER_MODELS.get(model_stem, "<Unknown>")
-            elif settings.is_game("DEMONS_SOULS"):
+            elif settings.is_game(GameType.DemonsSouls):
                 model_name = DES_CHARACTER_MODELS.get(model_stem, "<Unknown>")
             elif settings.is_er_family():
-                from soulstruct.blender.general.character_names import get_character_name_map
+                from ....general.character_names import get_character_name_map
 
                 model_name = get_character_name_map(settings).get(model_stem, ER_CHARACTER_MODELS.get(model_stem, "<Unknown>"))
 
@@ -273,27 +281,35 @@ class ImportCharacterFLVER(BaseFLVERImportOperator):
         self,
         context: bpy.types.Context,
         settings: SoulstructSettings,
-        import_settings: FLVERImportSettings,
         bl_flver: BlenderFLVER,
     ):
-        if import_settings.add_name_suffix:
-            if settings.is_game_ds1():
-                model_dict = DS1_CHARACTER_MODELS
-            elif settings.is_game("DEMONS_SOULS"):
-                model_dict = DES_CHARACTER_MODELS
-            else:
-                model_dict = {}
+        if not context.scene.flver_import_settings.add_name_suffix:
+            return
 
-            if model_dict:
-                # Add character description to model name.
-                try:
-                    model_id = int(bl_flver.name[1:5])
-                    model_desc = model_dict[model_id]
-                    # Don't trigger full rename.
-                    bl_flver.obj.name += f" <{model_desc}>"
-                    bl_flver.armature.name += f" <{model_desc}>"
-                except (ValueError, KeyError):
-                    pass
+        if settings.is_game(GameType.Bloodborne):
+            model_dict = BB_CHARACTER_MODELS
+        elif settings.is_game_ds1():
+            model_dict = DS1_CHARACTER_MODELS
+        elif settings.is_game(GameType.DemonsSouls):
+            model_dict = DES_CHARACTER_MODELS
+        elif settings.is_er_family():
+            from ....general.character_names import get_character_name_map
+
+            # Bundled ER/NR name maps (JSON) win; soulstruct ER constants fill gaps.
+            model_dict = {**ER_CHARACTER_MODELS, **get_character_name_map(settings)}
+        else:
+            # TODO: Use other games' character name dicts.
+            return
+
+        # Add character description to model name.
+        try:
+            model_id = int(bl_flver.name[1:5])
+            model_desc = model_dict[model_id]
+            # Don't trigger full rename.
+            bl_flver.obj.name += f" <{model_desc}>"
+            bl_flver.armature.name += f" <{model_desc}>"
+        except (ValueError, KeyError):
+            pass
 
     def get_collection(self, context: bpy.types.Context, file_directory_name: str):
         return find_or_create_collection(context.scene.collection, "Models", "Character Models")
@@ -301,7 +317,71 @@ class ImportCharacterFLVER(BaseFLVERImportOperator):
     # We do NOT look anywhere else for character textures.
 
 
-class ImportObjectFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportPlayerFLVER(LoggingOperator):
+    """Shortcut for opening 'c0000' FLVER."""
+    bl_idname = "import_scene.player_flver"
+    bl_label = "Import Player (c0000)"
+    bl_description = "Import player (c0000) FLVER from selected game 'chr' directory"
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return cls.settings(context).has_import_dir_path("chr")
+
+    def execute(self, context: bpy.types.Context):
+        """Default import method for FLVERs."""
+
+        settings = self.settings(context)
+
+        if settings.is_game(GameType.DemonsSouls):
+            # Nested inside character subfolder.
+            c0000_binder_path = Path(f"chr/c0000/c0000.chrbnd")
+        else:
+            # Not in subfolder.
+            c0000_binder_path = Path(f"chr/c0000.chrbnd")
+
+        try:
+            c0000_binder_path = settings.get_import_file_path(c0000_binder_path)
+        except FileNotFoundError:
+            return self.error(f"Cannot find c0000 CHRBND in 'chr' import directory.")
+
+        binder = pyre.Binder.from_path(c0000_binder_path)
+        flver_entries = binder.find_entries_by_name_regex(r".*\.flver(\.dcx)?")
+        flver_binder_sources = {}
+        if not flver_entries:
+            raise FLVERImportError(f"Cannot find a FLVER file in binder {c0000_binder_path}.")
+        if len(flver_entries) > 1:
+            self.warning("Found multiple FLVERs inside player (c0000) CHRBND. Unusual, but importing all.")
+        for entry in flver_entries:
+            flver_name = entry.stem
+            flver_binder_sources[flver_name] = (entry, binder)
+
+        collection = find_or_create_collection(context.scene.collection, "Models", "Character Models")
+
+        p = time.perf_counter()
+
+        bl_flvers = BlenderFLVER.new_batch_from_soulstruct_objs(
+            self,
+            context,
+            None,
+            flver_binder_sources,
+            texture_finder_callback=None,
+            flver_model_category="",
+            collection=collection,
+        )
+
+        # Select and frame view on (final) newly imported Mesh.
+        if bl_flvers and bpy.ops.view3d.view_selected.poll():
+            self.set_active_obj(next(iter(bl_flvers.values())).mesh)
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+
+        return {"FINISHED"}
+
+    # Player model has no meshes or textures.
+
+
+@io_soulstruct_operator
+class ImportObjectFLVER(_BaseFLVERImportOperator):
     """Shortcut for browsing for OBJBND Binders in game 'obj' directory."""
     bl_idname = "import_scene.object_flver"
     bl_label = "Import Object"
@@ -336,7 +416,8 @@ class ImportObjectFLVER(BaseFLVERImportOperator):
         image_import_manager.register_lazy_flver_map_textures(map_dir, flver)
 
 
-class ImportAssetFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportAssetFLVER(_BaseFLVERImportOperator):
     """Shortcut for browsing for GEOMBND Binders in game 'asset' directory."""
     bl_idname = "import_scene.asset_flver"
     bl_label = "Import Asset"
@@ -366,15 +447,15 @@ class ImportAssetFLVER(BaseFLVERImportOperator):
         return find_or_create_collection(context.scene.collection, "Models", "Asset Models")
 
 
-class ImportEquipmentFLVER(BaseFLVERImportOperator):
+@io_soulstruct_operator
+class ImportEquipmentFLVER(_BaseFLVERImportOperator):
     """Import weapon/armor FLVER from a `partsbnd` Binder.
 
-    NOTE: Earlier versions of Soulstruct forced you to select an imported `c0000` model, and the mesh and dummies of
-    this equipment FLVER would be parented to that model. However, this was actually destructive, as it prevented the
-    user from viewing or editing the partial c0000 Armature that is actually present in the equipment FLVER.
+    Optionally, you may attach these FLVER meshes to an existing `c0000` FLVER Armature instead of the one in the
+    parts FLVER. When using the Export Equipment FLVER operator, only c0000 bones that are used by the equipment meshes
+    will appear in the output.
 
-    If you want to animate equipment with c0000 animations, you can simply set those animations to this FLVER -- the
-    Armature bones should all be compatible.
+    Note that you can load c0000 animations onto a standalone Equipment FLVER without needing to attach it to c0000.
     """
     bl_idname = "import_scene.equipment_flver"
     bl_label = "Import Equipment"
@@ -389,12 +470,329 @@ class ImportEquipmentFLVER(BaseFLVERImportOperator):
     DEFAULT_SUBDIR = "parts"
     POLL_DEFAULT_SUBDIR = True
 
-    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'}, )
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
     directory: bpy.props.StringProperty(options={'HIDDEN'}, subtype="DIR_PATH")
+
+    use_c0000_armature: bpy.props.BoolProperty(
+        default=False,
+        name="Use c0000 Armature",
+        description=(
+            "Parent equipment model to armature of c0000 FLVER if detected in scene, instead of a new armature. "
+            "Currently only works for armor equipment, not weapons"
+        ),
+    )
+
+    def draw(self, context):
+        super().draw(context)
+        self.layout.prop(self, "use_c0000_armature")
 
     # Base `execute` method is fine.
 
     def get_collection(self, context: bpy.types.Context, file_directory_name: str):
         return find_or_create_collection(context.scene.collection, "Models", "Equipment Models")
+
+    def post_process_flver(
+        self,
+        context: bpy.types.Context,
+        settings: SoulstructSettings,
+        bl_flver: BlenderFLVER,
+    ) -> None:
+        """Parent equipment model to c0000 if detected."""
+        super().post_process_flver(context, settings, bl_flver)
+
+        if not self.use_c0000_armature:
+            return
+
+        if not (new_armature := bl_flver.armature):
+            self.warning("Equipment FLVER has no Armature; cannot parent to c0000. This is highly unusual.")
+            return
+
+        bl_c0000 = find_obj("c0000", ObjectType.MESH, SoulstructType.FLVER, bl_name_func=get_model_name)
+
+        if not bl_c0000:
+            self.warning(f"Could not find c0000 FLVER to parent Equipment {bl_flver.name} to.")
+            return
+        c0000 = BlenderFLVER(bl_c0000)
+        if not c0000.armature:
+            self.warning(
+                f"c0000 FLVER found for parenting, but it has no Armature. Cannot parent Equipment {bl_flver.name}."
+            )
+            return
+
+        # Change parent to c0000 Armature.
+        bl_flver.obj.parent = c0000.armature
+        # Change modifier target to c0000 Armature.
+        bl_flver.obj.modifiers["FLVER Armature"].object = c0000.armature
+
+        # Add bl_flver.obj to all collections of c0000.
+        for coll in c0000.obj.users_collection:
+            coll.objects.link(bl_flver.obj)
+
+        # Delete newly created Armature.
+        bpy.data.objects.remove(new_armature)
+
+
+# noinspection PyUnusedLocal
+def _armor_set_id_choices(self, context):
+    return ImportArmorSetFLVERs.armor_set_id_choices
+
+
+@io_soulstruct_operator
+class ImportArmorSetFLVERs(LoggingOperator):
+    """Import armor FLVER from all `partsbnd` Binders belonging to the same ArmorParam (EquipParamProtector) set.
+
+    Optionally, you may attach these FLVER meshes to an existing `c0000` FLVER Armature instead of the one in the
+    parts FLVER. When using the Export Equipment FLVER operator, only c0000 bones that are used by the equipment meshes
+    will appear in the output.
+
+    Note that you can load c0000 animations onto a standalone Equipment FLVER without needing to attach it to c0000.
+    """
+    bl_idname = "import_scene.armor_set_flvers"
+    bl_label = "Import Armor Set"
+    bl_description = "Import armor set FLVERs from PARTSBNDs in selected game 'parts' directory"
+
+    armor_set_id_choices: tp.ClassVar[list[tuple[str, str, str]]] = []
+
+    prefer_female: bpy.props.BoolProperty(
+        name="Prefer Female Variant",
+        default=True,
+        description="Use female (F) parts if available rather than male (M) parts. Falls back to all (A) either way",
+    )
+    preferred_skin_variant: bpy.props.EnumProperty(
+        name="Preferred Skin Variant",
+        items=[
+            ("Human", "Human", "Human"),
+            ("Hollow", "Hollow", "Hollow (_M)"),
+            ("L", "L", "L (_L)"),
+            ("S", "S", "S (_S)"),
+        ],
+        default="Human",
+        description="Choose PARTSBND suffix (skin variant) to prefer. Falls back to Human if preference absent",
+    )
+    use_c0000_armature: bpy.props.BoolProperty(
+        name="Use c0000 Armature",
+        default=True,
+        description=(
+            "Parent equipment model to armature of c0000 FLVER if detected in scene, instead of a new armature. "
+            "Currently only works for armor equipment, not weapons"
+        ),
+    )
+    armor_set_id: bpy.props.EnumProperty(
+        items=_armor_set_id_choices,
+        name="Armor Set ID",
+        description="Choose an armor set ID to import",
+    )
+
+    # Default `draw()` is fine.
+
+    def invoke(self, context, event):
+        """User chooses an armor set ID.
+
+        Available IDs are ANY armor-type PARTSBND ID found in `parts`.
+
+        TODO: Draw known Armor Set name next to enum option.
+        """
+        settings = self.settings(context)
+        parts_dir_path = settings.get_import_dir_path("parts")
+        if not parts_dir_path or not parts_dir_path.is_dir():
+            raise FileNotFoundError(f"Cannot find `parts` subfolder in import directory.")
+
+        if not self.set_armor_set_id_choices(settings, parts_dir_path):
+            return self.error("No armor set IDs found in `parts` import directory.")
+
+        # Now prompt user to select an armor set ID.
+        return context.window_manager.invoke_props_dialog(self)
+
+    def find_armor_set_ids(self, parts_dir_path: Path) -> set[int]:
+        """Find the armor set ID of every armor-type PARTSBND in `parts_dir_path`."""
+        armor_set_ids = set()
+        for partsbnd_path in parts_dir_path.glob("*.partsbnd*"):
+            if partsbnd_path.suffix.lower() not in {".partsbnd", ".dcx"}:
+                continue
+            # NOTE: DS1 names are uppercase ('AM_M_1234'), but DeS names are lowercase ('am_m_1234').
+            partsbnd_name = partsbnd_path.name.upper()
+            if partsbnd_name[:2] not in {"AM", "BD", "HD", "LG"}:
+                # Ignore WP (weapon), FC (face), HR (hair), etc.
+                continue
+            try:
+                armor_set_id = int(partsbnd_name[5:9])  # TT_G_1234
+            except ValueError:
+                self.warning(f"Cannot parse armor set ID from PARTSBND: {partsbnd_path.name}")
+                continue
+            armor_set_ids.add(armor_set_id)
+        return armor_set_ids
+
+    def set_armor_set_id_choices(self, settings: SoulstructSettings, parts_dir_path: Path) -> bool:
+        """Populate `armor_set_id` enum choices from `parts_dir_path`. Returns `False` if no armor sets were found."""
+        armor_set_ids = self.find_armor_set_ids(parts_dir_path)
+        if not armor_set_ids:
+            return False
+
+        try:
+            armor_sets = getattr(settings.constants, "ARMOR_SETS")
+        except AttributeError:
+            ImportArmorSetFLVERs.armor_set_id_choices = [
+                # No default option.
+                (str(stem), str(stem), str(stem)) for stem in sorted(armor_set_ids)
+            ]
+        else:
+            ImportArmorSetFLVERs.armor_set_id_choices = [
+                # No default option.
+                (str(set_id), str(set_id), f"{set_id} <{armor_sets.get(set_id, 'Unknown')}>")
+                for set_id in sorted(armor_set_ids)
+            ]
+        return True
+
+    def execute(self, context):
+
+        p = time.perf_counter()
+        chosen_armor_set_id = int(self.armor_set_id)
+
+        settings = self.settings(context)
+        parts_dir_path = settings.get_import_dir_path("parts")
+        if not parts_dir_path or not parts_dir_path.is_dir():
+            raise FileNotFoundError(f"Cannot find `parts` subfolder in import directory.")
+
+        flver_binder_sources = {}  # type: dict[str, tuple[pyre.BinderEntry, pyre.Binder]]
+
+        # Map armor set type combinations to dicts of PARTSBND options mapped by (gender, suffix).
+        armor_set_options = {}  # type: dict[str, dict[str, dict[str, Path]]]
+
+        for partsbnd_path in parts_dir_path.glob("*.partsbnd*"):
+            if partsbnd_path.suffix.lower() not in {".partsbnd", ".dcx"}:
+                continue
+            # Uppercase for parsing only: DS1 names are uppercase, but DeS names are lowercase.
+            stem = partsbnd_path.name.split(".")[0].upper()
+            partsbnd_type = stem[:2]
+            if partsbnd_type not in {"AM", "BD", "HD", "LG"}:
+                # Ignore WP (weapon), FC (face), HR (hair), etc.
+                continue
+            try:
+                armor_set_id = int(stem[5:9])  # TT_G_1234
+            except ValueError:
+                self.warning(f"Cannot parse armor set ID from PARTSBND: {stem}")
+                continue
+            if armor_set_id != chosen_armor_set_id:
+                continue
+            # Found an option.
+            gender = stem[3:4]
+            suffix = stem[9:]
+            armor_set_options.setdefault(partsbnd_type, {}).setdefault(gender, {})[suffix] = partsbnd_path
+
+        # We import one option for each type, based on preferences.
+        import_partsbnd_paths = []
+        for armor_type, type_options in armor_set_options.items():
+            if self.prefer_female and "F" in type_options:
+                gender_options = type_options["F"]
+                gender = "F"
+            elif not self.prefer_female and "M" in type_options:
+                gender_options = type_options["M"]
+                gender = "M"
+            elif "A" in type_options:
+                gender_options = type_options["A"]
+                gender = "A"
+            else:
+                self.warning(f"Cannot find gender type A, F, or M for armor type {armor_type}.")
+                continue
+            for suffix, path in gender_options.items():
+                if self.preferred_skin_variant == "Human" and not suffix:
+                    import_partsbnd_paths.append(path)
+                    break
+                elif self.preferred_skin_variant == "Hollow" and "_M" in suffix:
+                    import_partsbnd_paths.append(path)
+                    break
+                elif self.preferred_skin_variant == "L" and "_L" in suffix:
+                    import_partsbnd_paths.append(path)
+                    break
+                elif self.preferred_skin_variant == "S" and "_S" in suffix:
+                    import_partsbnd_paths.append(path)
+                    break
+            else:
+                # No preferred skin variant found; just take the Human option if available.
+                if "" in gender_options:
+                    import_partsbnd_paths.append(gender_options[""])
+                else:
+                    self.warning(f"Cannot find preferred skin variant '{self.preferred_skin_variant}' or default Human "
+                                 f"variant for armor type {armor_type} (gender {gender}).")
+
+        for source_path in import_partsbnd_paths:
+
+            # NOTE: Will always import all FLVERs found in Binder.
+            binder = pyre.Binder.from_path(source_path)
+            flver_entries = binder.find_entries_by_name_regex(r".*\.flver(\.dcx)?")
+            if not flver_entries:
+                raise FLVERImportError(f"Cannot find a FLVER file in binder {source_path}.")
+
+            for entry in flver_entries:
+                flver_name = entry.stem
+                flver_binder_sources[flver_name] = (entry, binder)
+
+        self.info(
+            f"Extracted {len(flver_binder_sources)} FLVERs from PARTSBND Binders in {time.perf_counter() - p:.3f} s."
+        )
+
+        collection = find_or_create_collection(context.scene.collection, "Models", "Equipment Models")
+
+        p = time.perf_counter()
+
+        bl_flvers = BlenderFLVER.new_batch_from_soulstruct_objs(
+            self,
+            context,
+            None,
+            flver_binder_sources,
+            texture_finder_callback=None,
+            flver_model_category="",
+            collection=collection,
+        )
+
+        for bl_flver in bl_flvers.values():
+            self.post_process_flver(context, settings, bl_flver)
+
+        self.info(f"Loaded {len(bl_flvers)} FLVERs into Blender in {time.perf_counter() - p:.3f} s.")
+
+        # Select and frame view on (final) newly imported Mesh.
+        if bl_flvers and bpy.ops.view3d.view_selected.poll():
+            self.set_active_obj(next(iter(bl_flvers.values())).mesh)
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+
+        return {"FINISHED"}
+
+    def post_process_flver(
+        self,
+        context: bpy.types.Context,
+        settings: SoulstructSettings,
+        bl_flver: BlenderFLVER,
+    ) -> None:
+        """Parent equipment model to c0000 if detected."""
+        if not self.use_c0000_armature:
+            return
+
+        if not (new_armature := bl_flver.armature):
+            self.warning("Equipment FLVER has no Armature; cannot parent to c0000. This is highly unusual.")
+            return
+
+        bl_c0000 = find_obj("c0000", ObjectType.MESH, SoulstructType.FLVER, bl_name_func=get_model_name)
+
+        if not bl_c0000:
+            self.warning(f"Could not find c0000 FLVER to parent Equipment {bl_flver.name} to.")
+            return
+        c0000 = BlenderFLVER(bl_c0000)
+        if not c0000.armature:
+            self.warning(
+                f"c0000 FLVER found for parenting, but it has no Armature. Cannot parent Equipment {bl_flver.name}."
+            )
+            return
+
+        # Change parent to c0000 Armature.
+        bl_flver.obj.parent = c0000.armature
+        # Change modifier target to c0000 Armature.
+        bl_flver.obj.modifiers["FLVER Armature"].object = c0000.armature
+
+        # Add bl_flver.obj to all collections of c0000.
+        for coll in c0000.obj.users_collection:
+            coll.objects.link(bl_flver.obj)
+
+        # Delete newly created Armature.
+        bpy.data.objects.remove(new_armature)
 
 # endregion

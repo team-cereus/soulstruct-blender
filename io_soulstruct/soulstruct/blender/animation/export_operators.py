@@ -20,10 +20,11 @@ from soulstruct.games import ELDEN_RING
 from soulstruct.dcx import DCXType
 from soulstruct.havok.fromsoft.base import BaseSkeletonHKX, BaseAnimationHKX
 
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.flver.models import BlenderFLVER
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..exceptions import *
+from ..flver.models import BlenderFLVER
+from ..types import *
 from .utilities import *
 from .types import SoulstructAnimation
 
@@ -34,7 +35,7 @@ SKELETON_ENTRY_RE = re.compile(r"skeleton\.hkx", re.IGNORECASE)
 def _resolve_animation_hkx_dcx_type(settings, dcx_type_name: str) -> DCXType:
     """HKX clips inside ANIBND are never DCX-wrapped; only the outer binder uses KRAK."""
     if dcx_type_name == "AUTO":
-        game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR.get(settings.game)
+        game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR.get(settings.game_type)
         if game_anim_info is not None:
             return game_anim_info.dcx_type
         return settings.resolve_dcx_type(dcx_type_name, "hkx")
@@ -72,11 +73,13 @@ def _is_bl_flver_with_animation_data(obj: bpy.types.Object) -> tp.TypeGuard[Mesh
     return bool(bl_flver.armature and bl_flver.armature.animation_data and bl_flver.armature.animation_data.action)
 
 
+@io_soulstruct_operator
 class ExportAnyHKXAnimation(LoggingExportOperator):
     """Export loose HKX animation file from an Action attached to active FLVER Armature."""
     bl_idname = "export_scene.hkx_animation"
     bl_label = "Export Any HKX Animation"
     bl_description = "Export a Blender action to a standalone HKX animation file with manual HKX skeleton source"
+
 
     filename_ext = ".hkx"
 
@@ -210,6 +213,7 @@ class ExportAnyHKXAnimation(LoggingExportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportHKXAnimationIntoAnyBinder(LoggingImportOperator):
     """Export HKX animation from an Action attached to a FLVER armature, into an existing BND."""
     bl_idname = "export_scene.hkx_animation_binder"
@@ -328,7 +332,12 @@ class ExportHKXAnimationIntoAnyBinder(LoggingImportOperator):
         return {"FINISHED"}
 
 
-class BaseExportTypedHKXAnimation(LoggingOperator):
+class _BaseExportTypedHKXAnimation(LoggingOperator):
+
+    # Optional class variable for `SkeletonHKX` instance. Useful for tests.
+    # If `None`, the skeleton must appear in the targeted Binder for export
+    # (with special handling used for c0000 split ANIBNDs).
+    SKELETON_HKX: tp.ClassVar[SKELETON_TYPING | None] = None
 
     @classmethod
     def poll(cls, context) -> bool:
@@ -347,7 +356,8 @@ class BaseExportTypedHKXAnimation(LoggingOperator):
         return bool(bl_flver.armature and bl_flver.armature.animation_data and bl_flver.armature.animation_data.action)
 
 
-class ExportCharacterHKXAnimation(BaseExportTypedHKXAnimation):
+@io_soulstruct_operator
+class ExportCharacterHKXAnimation(_BaseExportTypedHKXAnimation):
     """Export active animation from selected character Armature into that character's game ANIBND."""
     bl_idname = "export_scene.hkx_character_animation"
     bl_label = "Export Character Anim"
@@ -372,7 +382,7 @@ class ExportCharacterHKXAnimation(BaseExportTypedHKXAnimation):
 
         settings = self.settings(context)
         try:
-            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game]
+            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_CHR[settings.game_type]
         except KeyError:
             return self.error(f"Automatic ANIBND export is not yet supported for game {settings.game.name}.")
 
@@ -395,25 +405,29 @@ class ExportCharacterHKXAnimation(BaseExportTypedHKXAnimation):
         except FileNotFoundError as ex:
             return self.error(f"Cannot find ANIBND for character {model_name}: {ex}")
 
-        # Skeleton is in ANIBND.
-        skeleton_anibnd = anibnd
-        try:
-            skeleton_entry = skeleton_anibnd[SKELETON_ENTRY_RE]
-        except EntryNotFoundError:
-            return self.error("Could not find 'skeleton.hkx' (case-insensitive) in ANIBND.")
-        compendium = (
-            load_anibnd_compendium(anibnd, hkx_entry_path=skeleton_entry.path, model_name=model_name)
-            if settings.is_er_family()
-            else None
-        )
-        skeleton_hkx = read_skeleton_hkx_entry(skeleton_entry, compendium)
+        if self.SKELETON_HKX is not None:
+            self.info(f"Using operator SKELETON_HKX for export: {self.SKELETON_HKX.path_name}")
+            skeleton_hkx = self.SKELETON_HKX
+        else:
+            # Skeleton is in ANIBND.
+            skeleton_anibnd = anibnd
+            try:
+                skeleton_entry = skeleton_anibnd[SKELETON_ENTRY_RE]
+            except EntryNotFoundError:
+                return self.error("Could not find 'skeleton.hkx' (case-insensitive) in ANIBND.")
+            compendium = (
+                load_anibnd_compendium(anibnd, hkx_entry_path=skeleton_entry.path, model_name=model_name)
+                if settings.is_er_family()
+                else None
+            )
+            skeleton_hkx = read_skeleton_hkx_entry(skeleton_entry, compendium)
 
         # Get animation stem from action name. We will re-format its ID in the selected game's known format (e.g. to
         # support cross-game conversion).
         animation_id = bl_animation.animation_id
 
         if model_name == "c0000":
-            sub_anibnd_stems = [entry.stem for entry in anibnd.find_entries_matching_name(r"c0000_.*\.txt")]
+            sub_anibnd_stems = [entry.stem for entry in anibnd.find_entries_by_name_regex(r"c0000_.*\.txt")]
             if not sub_anibnd_stems:
                 return self.error("Could not find any sub-ANIBND definitions (e.g. 'c0000_a0x.txt') in c0000 ANIBND.")
             # For now, we keep it simple: load ALL sub-ANIBNDs, find the one with a matching animation ID to replace,
@@ -504,7 +518,8 @@ class ExportCharacterHKXAnimation(BaseExportTypedHKXAnimation):
         return {"FINISHED" if exported_paths else "CANCELLED"}
 
 
-class ExportObjectHKXAnimation(BaseExportTypedHKXAnimation):
+@io_soulstruct_operator
+class ExportObjectHKXAnimation(_BaseExportTypedHKXAnimation):
     """Export active animation from selected object Armature into that object's game OBJBND."""
     bl_idname = "export_scene.object_hkx_animation"
     bl_label = "Export Object Anim"
@@ -528,7 +543,7 @@ class ExportObjectHKXAnimation(BaseExportTypedHKXAnimation):
         model_name = bl_flver.game_name
 
         try:
-            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_OBJ[settings.game]
+            game_anim_info = SoulstructAnimation.GAME_ANIMATION_INFO_OBJ[settings.game_type]
         except KeyError:
             return self.error(f"Automatic OBJBND + ANIBND export is not yet supported for game {settings.game.name}.")
 

@@ -10,14 +10,16 @@ import traceback
 import bpy
 
 from soulstruct.containers import Binder, EntryNotFoundError
+from soulstruct.base.maps.msb.models import BaseMSBModel
 from soulstruct.base.maps.navmesh.nvm import NVM
 
-from soulstruct.blender.exceptions import NVMImportError
-from soulstruct.blender.navmesh.nvm.types import BlenderNVM
-from soulstruct.blender.utilities import LoggingOperator, find_or_create_collection
-from soulstruct.blender.types import MeshObject
+from .....base.operators import *
+from .....exceptions import NVMImportError
+from .....navmesh.nvm.types import BlenderNVM
+from .....utilities import find_or_create_collection
+from .....types import MeshObject
 
-from .base import BaseBlenderMSBModelImporter, MODEL_T
+from .base import BaseBlenderMSBModelImporter
 
 
 class BlenderMSBNavmeshModelImporter(BaseBlenderMSBModelImporter):
@@ -29,7 +31,7 @@ class BlenderMSBNavmeshModelImporter(BaseBlenderMSBModelImporter):
         context: bpy.types.Context,
         model_name: str,
         map_stem: str,
-        model_collection: bpy.types.Collection = None,
+        model_collection: bpy.types.Collection | None = None,
     ) -> MeshObject:
         """Import the Navmesh NVM model of the given name into a collection in the current scene.
 
@@ -45,7 +47,7 @@ class BlenderMSBNavmeshModelImporter(BaseBlenderMSBModelImporter):
         nvm_entry_name = model_name + ".nvm"  # no DCX in any games that use NVM
         nvmbnd = Binder.from_path(nvmbnd_path)
         try:
-            nvm_entry = nvmbnd.find_entry_matching_name(nvm_entry_name, flags=re.IGNORECASE, escape=True)
+            nvm_entry = nvmbnd.find_entry_by_name_regex(nvm_entry_name, flags=re.IGNORECASE, escape=True)
         except EntryNotFoundError:
             raise NVMImportError(f"Could not find NVM entry '{nvm_entry_name}' in NVMBND file '{nvmbnd_path.name}'.")
 
@@ -85,7 +87,7 @@ class BlenderMSBNavmeshModelImporter(BaseBlenderMSBModelImporter):
         cls,
         operator: LoggingOperator,
         context: bpy.types.Context,
-        models: list[MODEL_T],
+        models: list[BaseMSBModel],
         map_stem: str,
     ):
         """Import all models for a batch of MSB Navmeshes, as needed, in parallel as much as possible.

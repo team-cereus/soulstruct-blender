@@ -10,10 +10,11 @@ import typing as tp
 
 import bpy
 
-from soulstruct.blender.bpy_base.panel import SoulstructPanel
-from soulstruct.blender.types import ObjectType, SoulstructType
-from soulstruct.blender.flver.image.import_operators import ImportTextures
-from soulstruct.blender.flver.image.misc_operators import FindMissingTexturesInImageCache
+from ...base.register import io_soulstruct_panel
+from ...bpy_base.panel import SoulstructPanel, smart_prop
+from ...types import ObjectType, SoulstructType
+from ...flver.image.import_operators import ImportTextures
+from ...flver.image.misc_operators import FindMissingTexturesInImageCache
 
 from .operators import *
 
@@ -29,6 +30,7 @@ def is_flver_or_flver_msb_part(obj: bpy.types.Object) -> bool:
     return False
 
 
+@io_soulstruct_panel
 class FLVERGXItemUIList(bpy.types.UIList):
     """Draws a list of `GXItem` elements."""
 
@@ -50,19 +52,20 @@ class FLVERGXItemUIList(bpy.types.UIList):
             row = layout.row()
             # Split (0.2, 0.2, 0.6).
             split = row.split(factor=0.2)
-            split.prop(item, "category", text="", emboss=True)
+            smart_prop(split, item, "category", text="", emboss=True)
             subsplit = split.split(factor=0.25)
-            subsplit.prop(item, "index", text="", emboss=True)
-            subsplit.prop(item, "data", text="", emboss=True)
+            smart_prop(subsplit, item, "index", text="", emboss=True)
+            smart_prop(subsplit, item, "data", text="", emboss=True)
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             split = layout.split(factor=0.2)
-            split.prop(item, "category", text="", emboss=True)
+            smart_prop(split, item, "category", text="", emboss=True)
             subsplit = split.split(factor=0.25)
-            subsplit.prop(item, "index", text="", emboss=True)
-            subsplit.prop(item, "data", text="", emboss=True)
+            smart_prop(subsplit, item, "index", text="", emboss=True)
+            smart_prop(subsplit, item, "data", text="", emboss=True)
 
 
+@io_soulstruct_panel
 class FLVERMaterialPropsPanel(SoulstructPanel):
     """FLVER Material properties, available on all Blender materials."""
     bl_label = "FLVER Material Properties"
@@ -109,9 +112,12 @@ class FLVERMaterialPropsPanel(SoulstructPanel):
                 col = row.column(align=True)
                 col.operator(AddMaterialGXItem.bl_idname, icon='ADD', text="")
                 col.operator(RemoveMaterialGXItem.bl_idname, icon='REMOVE', text="")
+            elif prop == "shader_name":
+                # Read-only.
+                layout.label(text=f"Shader: {props.shader_name}")
             else:
                 # Standard public property.
-                layout.prop(props, prop)
+                smart_prop(layout, props, prop)
 
         label_done = False
         for key, value in material.items():
@@ -123,6 +129,7 @@ class FLVERMaterialPropsPanel(SoulstructPanel):
                 layout.label(text=f"{key}: {value}")
 
 
+@io_soulstruct_panel
 class FLVERMaterialToolsPanel(SoulstructPanel):
     bl_label = "FLVER Material Tools"
     bl_idname = "SCENE_PT_flver_material_tools"
@@ -138,15 +145,16 @@ class FLVERMaterialToolsPanel(SoulstructPanel):
         header.label(text="Material Tools")
         if panel:
             material_tool_settings = context.scene.material_tool_settings
-            panel.prop(material_tool_settings, "use_model_stem_in_material_name")
-            panel.prop(material_tool_settings, "clean_up_identical")
+            smart_prop(panel, material_tool_settings, "use_model_stem_in_material_name")
+            smart_prop(panel, material_tool_settings, "clean_up_identical")
             panel.operator(AutoRenameMaterials.bl_idname)
             panel.operator(MergeFLVERMaterials.bl_idname)
             panel.operator(RegenerateFLVERMaterialShaders.bl_idname)
+            panel.operator(RegenerateAllFLVERMaterialShaders.bl_idname)
             active_object = context.active_object
             if active_object and active_object.active_material:
                 panel.label(text=active_object.active_material.name)
-                panel.prop(material_tool_settings, "albedo_image")
+                smart_prop(panel, material_tool_settings, "albedo_image")
                 panel.operator(SetMaterialTexture0.bl_idname)
                 panel.operator(SetMaterialTexture1.bl_idname)
             else:

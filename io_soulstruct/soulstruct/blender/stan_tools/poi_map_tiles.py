@@ -13,13 +13,14 @@ from soulstruct.eldenring.models.geombnd import aeg_geombnd_relative_path, find_
 from soulstruct.flver import FLVER
 from soulstruct.nightreign.maps.poi_map_pieces import find_msb_path, iter_map_piece_instances, resolve_msb_stem
 
-from soulstruct.blender.flver.image.image_import_manager import ImageImportManager
-from soulstruct.blender.flver.models.types import BlenderFLVER
-from soulstruct.blender.flver.utilities import get_flvers_from_binder
-from soulstruct.blender.general.game_structure import GameStructure
-from soulstruct.blender.general.properties import SoulstructSettings
-from soulstruct.blender.utilities import LoggingOperator, find_or_create_collection
-from soulstruct.blender.utilities.conversion import to_blender
+from ..flver.image.image_import_manager import ImageImportManager
+from ..flver.models.types import BlenderFLVER
+from ..flver.utilities import get_flvers_from_binder
+from ..general.game_structure import GameStructure
+from ..general.properties import SoulstructSettings
+from ..base.operators import LoggingOperator
+from ..utilities import find_or_create_collection
+from ..utilities.conversion import to_blender
 
 from .debug_log import stan_info, stan_warning
 from .nr_poi import map_id_str

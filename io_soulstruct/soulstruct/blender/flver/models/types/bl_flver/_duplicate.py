@@ -5,16 +5,16 @@ __all__ = [
     "duplicate_armature",
     "duplicate_dummies",
     "duplicate",
-    "duplicate_edit_mode",
+    "to_new_bl_flver_edit_mode",
 ]
 
 import typing as tp
 
 import bpy
 
-from soulstruct.blender.exceptions import *
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
+from .....exceptions import *
+from .....types import *
+from .....utilities import *
 
 if tp.TYPE_CHECKING:
     from .core import BlenderFLVER
@@ -26,13 +26,13 @@ def duplicate_armature(
     child_mesh_obj: MeshObject,
     as_data_instance=False,
 ) -> ArmatureObject:
-    if not bl_flver.armature:
+    if not (armature := bl_flver.armature):
         # TODO: Could copy 'implicit Armature' by creating a single-bone Armature with the same name as the model.
         raise FLVERError("No Armature to duplicate for FLVER model.")
 
     new_armature_obj = new_armature_object(
-        bl_flver.armature.name,
-        data=bl_flver.armature.data if as_data_instance else bl_flver.armature.copy(),
+        armature.name,
+        data=armature.data if as_data_instance else armature.data.copy(),
     )
     for collection in child_mesh_obj.users_collection:
         collection.objects.link(new_armature_obj)
@@ -97,19 +97,23 @@ def duplicate(
     return bl_flver.__class__(new_mesh_obj)
 
 
-def duplicate_edit_mode(
+def to_new_bl_flver_edit_mode(
     bl_flver: BlenderFLVER,
     context: bpy.types.Context,
+    duplicate_selected_geometry: bool = True,
     make_materials_single_user=True,
     copy_pose=False,
 ) -> BlenderFLVER:
+    """Cut or copy (default) selected EDIT_MESH geometry to a new BlenderFLVER."""
     if context.edit_object != bl_flver.mesh:
         raise FLVERError(f"Mesh of FLVER model '{bl_flver.name}' is not currently being edited in Edit Mode.")
 
-    # Duplicate selected mesh data, then separate it into new object. Note that the `separate` operator will add the
-    # new mesh to the same collection(s) automatically.
-    bpy.ops.mesh.duplicate()
-    bpy.ops.mesh.separate(type="SELECTED")  # new data-block; also copies properties, materials, data layers, etc.
+    if duplicate_selected_geometry:
+        # Duplicate selected mesh data, then separate it into new object. Note that the `separate` operator will add the
+        # new mesh to the same collection(s) automatically.
+        bpy.ops.mesh.duplicate()
+
+    bpy.ops.mesh.separate(type="SELECTED")  # new data-block; also copies properties, data layers, etc. (NOT materials)
 
     # noinspection PyTypeChecker
     new_mesh_obj = context.selected_objects[-1]  # type: MeshObject

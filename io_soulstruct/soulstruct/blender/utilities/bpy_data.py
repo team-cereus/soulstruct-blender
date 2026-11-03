@@ -10,13 +10,14 @@ __all__ = [
     "copy_obj_property_group",
     "copy_armature_pose",
     "find_or_create_collection",
+    "resolve_collection",
 ]
 
 import typing as tp
 
 import bpy
 
-from soulstruct.blender.types import *
+from ..types import *
 from .misc import remove_dupe_suffix
 
 if tp.TYPE_CHECKING:
@@ -257,3 +258,12 @@ def find_or_create_collection(root_collection: bpy.types.Collection, *names: str
         parent_collection = find_or_create_collection(root_collection, *names)
         parent_collection.children.link(collection)
         return collection
+
+
+def resolve_collection(context: bpy.types.Context, collection: bpy.types.Collection | None) -> bpy.types.Collection:
+    """Assert that either `collection` is given or `context.scene.collection` exists."""
+    if collection:
+        return collection
+    if context.scene.collection:
+        return context.scene.collection
+    raise ValueError("No collection specified and `context.scene.collection` does not exist.")

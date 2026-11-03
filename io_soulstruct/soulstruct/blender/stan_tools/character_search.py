@@ -12,8 +12,9 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.blender.general.character_names import get_character_name_map
-from soulstruct.blender.flver.models.operators.import_operators import ImportCharacterFLVER
+from ..general.character_names import get_character_name_map
+from ..flver.models.operators.import_operators import ImportCharacterFLVER
+from ..base.register import io_soulstruct_operator
 
 _CHR_BND_RE = re.compile(r"^(c\d+)\.chrbnd(\.dcx)?(\.bak)?$", re.IGNORECASE)
 
@@ -82,6 +83,7 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
     return items
 
 
+@io_soulstruct_operator
 class StanSearchCharacterToImport(ImportCharacterFLVER):
     """Import a character FLVER by searchable name/id (Stan's Tools only)."""
 

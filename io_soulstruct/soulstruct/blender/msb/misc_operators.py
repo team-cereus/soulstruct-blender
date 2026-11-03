@@ -14,7 +14,7 @@ __all__ = [
     "CopyDrawGroups",
     "ApplyPartTransformToModel",
     "CreateConnectCollision",
-    "MSBFindPartsPointer",
+    "FindMSBPartsPointer",
     "FindMSBParts",
     "FindEntityID",
     "ColorMSBEvents",
@@ -30,23 +30,25 @@ import bpy
 from mathutils import Matrix
 
 from soulstruct.base.maps.msb.region_shapes import RegionShapeType
-from soulstruct.games import DEMONS_SOULS, DARK_SOULS_PTDE, DARK_SOULS_DSR
+from soulstruct.games import GameType
 
-from soulstruct.blender.exceptions import FLVERError
-from soulstruct.blender.general import SoulstructSettings
-from soulstruct.blender.collision.types import BlenderMapCollision
-from soulstruct.blender.flver.models import BlenderFLVER
-from soulstruct.blender.msb.operator_config import BLENDER_MSB_PART_CLASSES
-from soulstruct.blender.msb.properties.parts import MSBPartArmatureMode
-from soulstruct.blender.navmesh.nvm.types import BlenderNVM
-from soulstruct.blender.types import *
-from soulstruct.blender.utilities import *
-
+from ..base.operators import *
+from ..base.register import io_soulstruct_properties, io_soulstruct_operator, io_soulstruct_pointer_property
+from ..collision.types import BlenderMapCollision
+from ..exceptions import FLVERError
+from ..flver.models import BlenderFLVER
+from ..general import SoulstructSettings
+from ..navmesh.nvm.types import BlenderNVM
+from ..types import *
+from ..utilities import *
+from .operator_config import BLENDER_MSB_PART_CLASSES
 from .properties import BlenderMSBPartSubtype
+from .properties.parts import MSBPartArmatureMode
 from .types.base.parts import BaseBlenderMSBPart
 from .utilities import primitive_cube
 
 
+@io_soulstruct_operator
 class EnableAllImportModels(LoggingOperator):
 
     bl_idname = "object.msb_enable_all_import_models"
@@ -63,6 +65,7 @@ class EnableAllImportModels(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class DisableAllImportModels(LoggingOperator):
 
     bl_idname = "object.msb_disable_all_import_models"
@@ -79,6 +82,7 @@ class DisableAllImportModels(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class EnableSelectedNames(LoggingOperator):
 
     bl_idname = "object.enable_selected_names"
@@ -95,6 +99,7 @@ class EnableSelectedNames(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class DisableSelectedNames(LoggingOperator):
 
     bl_idname = "object.disable_selected_names"
@@ -141,6 +146,8 @@ def _is_navmesh_part(_, obj: bpy.types.Object) -> bool:
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "msb_part_creation_templates")
 class MSBPartCreationTemplates(bpy.types.PropertyGroup):
     """Template pointers for `CreateMSBPart` operator (pointer properties cannot be used by operators)."""
 
@@ -177,6 +184,7 @@ class MSBPartCreationTemplates(bpy.types.PropertyGroup):
     )
 
 
+@io_soulstruct_operator
 class CreateMSBPart(LoggingOperator):
 
     bl_idname = "object.create_msb_part"
@@ -256,7 +264,7 @@ class CreateMSBPart(LoggingOperator):
     def poll(cls, context) -> bool:
         return (
             context.mode == "OBJECT"
-            and context.active_object
+            and context.active_object is not None
             and context.active_object.type == ObjectType.MESH
             and context.active_object.soulstruct_type in {
                 SoulstructType.FLVER, SoulstructType.COLLISION, SoulstructType.NAVMESH
@@ -291,35 +299,38 @@ class CreateMSBPart(LoggingOperator):
 
     def draw(self, context: Context):
 
+        layout = self.layout
+        if not layout:
+            return
         templates = context.scene.msb_part_creation_templates
 
         if self.part_subtype == BlenderMSBPartSubtype.MapPiece:
-            self.layout.prop(self, "msb_map_stem")
-            self.layout.prop(self, "part_name")
-            self.layout.prop(templates, "template_map_piece")
-            self.layout.prop(self, "draw_groups")
+            layout.prop(self, "msb_map_stem")
+            layout.prop(self, "part_name")
+            layout.prop(templates, "template_map_piece")
+            layout.prop(self, "draw_groups")
         elif self.part_subtype == BlenderMSBPartSubtype.Object:
-            self.layout.prop(self, "msb_map_stem")
-            self.layout.prop(self, "part_name")
-            self.layout.prop(templates, "template_object")
-            self.layout.prop(self, "draw_groups")
+            layout.prop(self, "msb_map_stem")
+            layout.prop(self, "part_name")
+            layout.prop(templates, "template_object")
+            layout.prop(self, "draw_groups")
         elif self.part_subtype == BlenderMSBPartSubtype.Character:
-            self.layout.prop(self, "msb_map_stem")
-            self.layout.prop(self, "part_name")
-            self.layout.prop(templates, "template_character")
-            self.layout.prop(self, "draw_groups")
+            layout.prop(self, "msb_map_stem")
+            layout.prop(self, "part_name")
+            layout.prop(templates, "template_character")
+            layout.prop(self, "draw_groups")
         elif self.part_subtype == BlenderMSBPartSubtype.Collision:
-            self.layout.prop(self, "msb_map_stem")
-            self.layout.prop(self, "part_name")
-            self.layout.prop(templates, "template_collision")
-            self.layout.prop(self, "draw_groups")
-            self.layout.prop(self, "display_groups")
-            self.layout.prop(self, "navmesh_groups")
+            layout.prop(self, "msb_map_stem")
+            layout.prop(self, "part_name")
+            layout.prop(templates, "template_collision")
+            layout.prop(self, "draw_groups")
+            layout.prop(self, "display_groups")
+            layout.prop(self, "navmesh_groups")
         elif self.part_subtype == BlenderMSBPartSubtype.Navmesh:
-            self.layout.prop(self, "msb_map_stem")
-            self.layout.prop(self, "part_name")
-            self.layout.prop(templates, "template_navmesh")
-            self.layout.prop(self, "navmesh_groups")
+            layout.prop(self, "msb_map_stem")
+            layout.prop(self, "part_name")
+            layout.prop(templates, "template_navmesh")
+            layout.prop(self, "navmesh_groups")
         else:
             self.layout.label(text=f"Invalid MSB Part subtype: {self.part_subtype}")
 
@@ -481,6 +492,7 @@ class CreateMSBPart(LoggingOperator):
         return prop_name != "model"
 
 
+@io_soulstruct_operator
 class CreateMSBRegion(LoggingOperator):
 
     bl_idname = "object.create_msb_region"
@@ -518,6 +530,7 @@ class CreateMSBRegion(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class CreateMSBEnvironmentEvent(LoggingOperator):
 
     bl_idname = "object.create_msb_environment_event"
@@ -611,6 +624,7 @@ class CreateMSBEnvironmentEvent(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class DuplicateMSBPartModel(LoggingOperator):
 
     bl_idname = "object.duplicate_part_model"
@@ -760,6 +774,7 @@ class DuplicateMSBPartModel(LoggingOperator):
         return new_model_name
 
 
+@io_soulstruct_operator
 class BatchSetPartGroups(LoggingOperator):
 
     bl_idname = "object.batch_set_part_groups"
@@ -813,6 +828,8 @@ class BatchSetPartGroups(LoggingOperator):
 
     def draw(self, context):
         """Only shows appropriate groups."""
+        if not self.layout:
+            return
         self.layout.prop(self, "operation")
         self.layout.prop(self, "draw_groups")
         self.layout.prop(self, "display_groups")
@@ -825,7 +842,7 @@ class BatchSetPartGroups(LoggingOperator):
         settings = self.settings(context)
         # We already checked that all selected objects have the same MSB Part subtype.
         part_subtype = context.selected_objects[0].MSB_PART.entry_subtype
-        bl_part_class = BLENDER_MSB_PART_CLASSES[settings.game][part_subtype]  # type: type[BaseBlenderMSBPart]
+        bl_part_class = BLENDER_MSB_PART_CLASSES[settings.game_type][part_subtype]  # type: type[BaseBlenderMSBPart]
         has_navmesh_groups = part_subtype in {BlenderMSBPartSubtype.Collision, BlenderMSBPartSubtype.Navmesh}
 
         draw_groups = display_groups = navmesh_groups = None
@@ -884,6 +901,7 @@ class BatchSetPartGroups(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class CopyDrawGroups(LoggingOperator):
 
     bl_idname = "object.copy_draw_groups"
@@ -903,7 +921,7 @@ class CopyDrawGroups(LoggingOperator):
         settings = self.settings(context)
         active_part = context.active_object
         active_part_subtype = active_part.MSB_PART.entry_subtype
-        bl_part_class = BLENDER_MSB_PART_CLASSES[settings.game][active_part_subtype]  # type: type[BaseBlenderMSBPart]
+        bl_part_class = BLENDER_MSB_PART_CLASSES[settings.game_type][active_part_subtype]  # type: type[BaseBlenderMSBPart]
         bl_active_part = bl_part_class(active_part)
         # noinspection PyUnresolvedReferences
         active_draw_groups = bl_active_part.draw_groups
@@ -913,7 +931,7 @@ class CopyDrawGroups(LoggingOperator):
             if part is active_part:
                 continue
             part_subtype = part.MSB_PART.entry_subtype
-            bl_part = BLENDER_MSB_PART_CLASSES[settings.game][part_subtype](part)
+            bl_part = BLENDER_MSB_PART_CLASSES[settings.game_type][part_subtype](part)
             bl_part.draw_groups = active_draw_groups
             count += 1
 
@@ -921,6 +939,7 @@ class CopyDrawGroups(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ApplyPartTransformToModel(LoggingOperator):
 
     bl_idname = "object.apply_part_transform_to_model"
@@ -983,6 +1002,7 @@ class ApplyPartTransformToModel(LoggingOperator):
         part.matrix_local = Matrix.Identity(4)  # reset to identity
 
 
+@io_soulstruct_operator
 class CreateConnectCollision(LoggingOperator):
     bl_idname = "object.create_connect_collision"
     bl_label = "Create Connect Collision"
@@ -1011,7 +1031,7 @@ class CreateConnectCollision(LoggingOperator):
     @classmethod
     def poll(cls, context) -> bool:
         settings = cls.settings(context)
-        if not settings.is_game(DEMONS_SOULS, DARK_SOULS_PTDE, DARK_SOULS_DSR):
+        if not settings.is_game(GameType.DemonsSouls, GameType.DarkSoulsPTDE, GameType.DarkSoulsDSR):
             return False
         if not context.selected_objects:
             return False
@@ -1028,11 +1048,11 @@ class CreateConnectCollision(LoggingOperator):
     def execute(self, context):
 
         settings = self.settings(context)
-        if settings.is_game(DARK_SOULS_PTDE):
+        if settings.is_game(GameType.DarkSoulsPTDE):
             from .types.darksouls1ptde import BlenderMSBConnectCollision
-        elif settings.is_game(DARK_SOULS_DSR):
+        elif settings.is_game(GameType.DarkSoulsDSR):
             from .types.darksouls1r import BlenderMSBConnectCollision
-        elif settings.is_game(DEMONS_SOULS):
+        elif settings.is_game(GameType.DemonsSouls):
             from .types.demonssouls import BlenderMSBConnectCollision
         else:
             return self.error(f"Connect Collision creation not supported for game {settings.game.name}.")
@@ -1098,7 +1118,9 @@ def _is_user_of_active_model(_, obj):
     )
 
 
-class MSBFindPartsPointer(bpy.types.PropertyGroup):
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "find_msb_parts_pointer")
+class FindMSBPartsPointer(bpy.types.PropertyGroup):
 
     part: bpy.props.PointerProperty(
         name="Part",
@@ -1108,6 +1130,7 @@ class MSBFindPartsPointer(bpy.types.PropertyGroup):
     )
 
 
+@io_soulstruct_operator
 class FindMSBParts(LoggingOperator):
 
     bl_idname = "object.find_msb_parts"
@@ -1149,6 +1172,7 @@ class FindMSBParts(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class FindEntityID(LoggingOperator):
 
     bl_idname = "object.find_msb_entity_id"
@@ -1203,6 +1227,7 @@ class FindEntityID(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ColorMSBEvents(LoggingOperator):
 
     bl_idname = "object.color_msb_events"
@@ -1271,6 +1296,7 @@ def _update_initial_transform(bl_part_obj: bpy.types.Object, bl_part_transform_o
     bl_part_obj["MSB Scale"] = bl_part_transform_obj.scale
 
 
+@io_soulstruct_operator
 class RestoreActivePartInitialTransform(LoggingOperator):
 
     bl_idname = "object.restore_active_part_initial_transform"
@@ -1294,6 +1320,7 @@ class RestoreActivePartInitialTransform(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class RestoreSelectedPartsInitialTransforms(LoggingOperator):
 
     bl_idname = "object.restore_selected_parts_initial_transforms"
@@ -1325,6 +1352,7 @@ class RestoreSelectedPartsInitialTransforms(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class UpdateActiveMSBPartInitialTransform(LoggingOperator):
 
     bl_idname = "object.update_active_msb_part_initial_transform"
@@ -1348,6 +1376,7 @@ class UpdateActiveMSBPartInitialTransform(LoggingOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class UpdateSelectedPartsInitialTransforms(LoggingOperator):
 
     bl_idname = "object.update_selected_parts_initial_transforms"

@@ -13,14 +13,16 @@ import bpy
 
 from soulstruct.containers import Binder, BinderEntry, EntryNotFoundError
 from soulstruct.containers.tpf import TPF, TPFTexture, TPFPlatform
+from soulstruct.flver.utilities import get_all_texture_paths
 from soulstruct.games import *
 
-from soulstruct.blender.utilities import LoggingOperator, CheckDCXMode, MAP_STEM_RE
+from ...base.operators import LoggingOperator
+from ...utilities import CheckDCXMode, MAP_STEM_RE
 
 if tp.TYPE_CHECKING:
     from soulstruct.flver import FLVER
 
-_LOGGER = logging.getLogger("soulstruct.io")
+_LOGGER = logging.getLogger("soulstruct.blender")
 
 TPF_RE = re.compile(r"(?P<stem>.*)\.tpf(?P<dcx>\.dcx)?$")
 CHRTPFBHD_RE = re.compile(r"(?P<stem>.*)\.chrtpfbhd?$")  # never has DCX
@@ -70,6 +72,9 @@ class ImageImportManager:
     # Holds TPF stems that have already been opened and scanned, so they aren't checked again.
     _scanned_tpf_sources: set[str]
 
+    # Records AET path once so that arbitrary 'aetXXX' textures can be found.
+    aet_root_directory: Path | None = None
+
     def __init__(self, operator: LoggingOperator, context: bpy.types.Context):
         self.operator = operator
         self.context = context
@@ -88,7 +93,7 @@ class ImageImportManager:
         else:
             self._register_parts_common_tpfs(parts_dir)
 
-    def find_flver_textures(self, flver_source_path: Path, flver_binder: Binder = None, prefer_hi_res=True):
+    def find_flver_textures(self, flver_source_path: Path, flver_binder: Binder | None = None, prefer_hi_res=True):
         """Register known game Binders/TPFs to be opened as needed.
 
         `flver_source_path` is the path to the Binder file containing the FLVER, or loose FLVER file.
@@ -105,14 +110,9 @@ class ImageImportManager:
             # Loose FLVER file. Likely a map piece in an older game like DS1. We look in adjacent `mXX` directory.
             self._register_map_tpfs(source_dir)
         elif source_name.endswith(".mapbnd"):
-            # MAPBND should have been given as an initial Binder. We also look in adjacent `Common*.tpf` loose TPFs.
-            _LOGGER.warning("Cannot yet find MAPBND Map Piece FLVER textures.")
-            # TODO: Elden Ring MAPBND Map Piece textures are in 'asset/aet' subdirectories, I believe.
-            # if flver_binder:
-            #     self.scan_binder_textures(flver_binder)
-            # else:
-            #     _LOGGER.warning(f"Opened MAPBND '{flver_binder}' was not passed to ImageImportManager!")
-            # self._find_mapbnd_tpfs(source_dir)
+            # MAPBND FLVER textures are in 'asset/aet'.
+            if not self.aet_root_directory:
+                self.aet_root_directory = (source_dir / "../../../asset/aet").resolve()
 
         # CHARACTERS
         elif model_stem.startswith("c") and source_name.endswith(".flver"):
@@ -123,19 +123,19 @@ class ImageImportManager:
             # header in CHRBND) for DSR, and adjacent loose folders for PTDE.
             if flver_binder:
                 self.scan_binder_textures(flver_binder)
-                if settings.is_game(DEMONS_SOULS):
+                if settings.is_game(GameType.DemonsSouls):
                     # CHRBND itself is already inside model subdirectory ('chr/cXXXX') alongside the loose TPFs.
                     self._register_chr_loose_tpfs(source_dir, CheckDCXMode.NO_DCX)
-                elif settings.is_game(DARK_SOULS_PTDE):
+                elif settings.is_game(GameType.DarkSoulsPTDE):
                     # CHRBND is next to a model subdirectory that contains loose TPFs ('chr/cXXXX').
                     self._register_chr_loose_tpfs(source_dir / model_stem, CheckDCXMode.NO_DCX)
-                elif settings.is_game(DARK_SOULS_DSR):
+                elif settings.is_game(GameType.DarkSoulsDSR):
                     # Some CHRBNDs have CHRTPFBDTs next to them (with the CHRTPFBHD inside the CHRBND).
                     self._register_chr_tpfbdts(source_dir, flver_binder)
-                elif settings.is_game(BLOODBORNE):
+                elif settings.is_game(GameType.Bloodborne):
                     # Bloodborne doesn't have any loose/BXF CHRBND textures. All TPFs are inside the CHRBND.
                     pass
-                elif settings.is_game(DARK_SOULS_3, SEKIRO):
+                elif settings.is_game(GameType.DarkSouls3, GameType.Sekiro):
                     self._register_chr_texbnd(source_dir, model_stem=model_stem, res="")  # no res
                 elif settings.is_er_family():
                     res = "_h" if prefer_hi_res else "_l"
@@ -169,8 +169,10 @@ class ImageImportManager:
 
         # ASSETS (Elden Ring)
         elif source_name.endswith(".geombnd"):
-            # Likely an AEG asset FLVER from Elden Ring onwards. We look in nearby `aet` directory.
-            self._register_aeg_tpfs(source_dir)
+            # Likely an AEG asset FLVER from Elden Ring onwards. These can use any AET texture, so we just record
+            # the 'asset/aet' path.
+            if not self.aet_root_directory:
+                self.aet_root_directory = (source_dir / "../../aet").resolve()
 
         # GENERIC BINDERS (e.g. Object FLVERs in OBJBNDs)
         elif source_name.endswith("bnd"):
@@ -185,7 +187,7 @@ class ImageImportManager:
 
     def scan_binder_textures(self, binder: Binder):
         """Register all TPFs in an arbitrary opened Binder (usually the one containing the FLVER) as pending sources."""
-        for tpf_entry in binder.find_entries_matching_name(TPF_RE):
+        for tpf_entry in binder.find_entries_by_name_regex(TPF_RE):
             tpf_entry_stem = lower_stem(tpf_entry)
             if tpf_entry_stem not in self._scanned_tpf_sources:
                 self._pending_tpf_sources.setdefault(tpf_entry_stem, tpf_entry)
@@ -224,6 +226,14 @@ class ImageImportManager:
         if texture_stem in self._tpf_textures:
             # Already found and loaded.
             return self._tpf_textures[texture_stem]
+
+        if texture_stem.startswith("aet"):
+            # NOTE: We register the standard TPF, not the '_l' low-res TPF.
+            if not self.aet_root_directory:
+                raise KeyError("ImageImportManager has not set the 'aet' root directory for asset textures.")
+            aet_tpf_path = self.aet_root_directory / texture_stem[:6] / f"{texture_stem[:10]}.tpf.dcx"
+            self._pending_tpf_sources.setdefault(texture_stem, aet_tpf_path)
+            # Can now be found below.
 
         if texture_stem in self._pending_tpf_sources:
             # Found a pending TPF with the exact same stem as the requested texture (should have only one DDS).
@@ -264,7 +274,7 @@ class ImageImportManager:
         raise KeyError(f"Could not find texture '{texture_stem}' in any registered Binders or TPFs.")
 
     def register_lazy_flver_map_textures(self, map_dir: Path, flver: FLVER) -> set[str]:
-        """Check all FLVER texture stems for any 'mAA_' prefixes and register texures in that map area dir.
+        """Check all FLVER texture stems for any 'mAA_' prefixes and register textures in that map area dir.
 
         Required for FLVERs that use 'lazy' texture loading:
             - Many Object FLVERs use textures from the map areas they expect to appear in.
@@ -278,7 +288,7 @@ class ImageImportManager:
 
         texture_map_areas = {
             texture_path.stem[:3]
-            for texture_path in flver.get_all_texture_paths()
+            for texture_path in get_all_texture_paths(flver)
             if MAP_AREA_RE.match(texture_path.stem)
         }
         for map_area in texture_map_areas:
@@ -366,7 +376,7 @@ class ImageImportManager:
     def _register_chr_tpfbdts(self, source_dir: Path, chrbnd: Binder):
         """CHRTPFBDTs never have DCX."""
         try:
-            tpfbhd_entry = chrbnd.find_entry_matching_name(CHRTPFBHD_RE)
+            tpfbhd_entry = chrbnd.find_entry_by_name_regex(CHRTPFBHD_RE)
         except (EntryNotFoundError, ValueError):
             # Optional, so we don't complain.
             return
@@ -379,7 +389,7 @@ class ImageImportManager:
             return
 
         tpfbxf = Binder.from_bytes(tpfbhd_entry.data, bdt_data=tpfbdt_path.read_bytes())
-        for tpf_entry in tpfbxf.find_entries_matching_name(TPF_RE):
+        for tpf_entry in tpfbxf.find_entries_by_name_regex(TPF_RE):
             # These are very likely to be used by the FLVER, but we still queue them up rather than open them now.
             tpf_stem = lower_stem(tpf_entry)
             if tpf_stem not in self._scanned_tpf_sources:
@@ -397,7 +407,7 @@ class ImageImportManager:
         if texbnd_path not in self._scanned_binder_paths and texbnd_path.is_file():
             self._scanned_binder_paths.add(texbnd_path)
             texbnd = Binder.from_path(texbnd_path)
-            for tpf_entry in texbnd.find_entries_matching_name(TPF_RE):
+            for tpf_entry in texbnd.find_entries_by_name_regex(TPF_RE):
                 # Multi-texture TPF; we unpack it now.
                 tpf_stem = lower_stem(tpf_entry)
                 texbnd_tpf = TPF.from_binder_entry(tpf_entry)
@@ -419,12 +429,15 @@ class ImageImportManager:
                             self._tpf_textures.setdefault(texture.stem.lower(), texture)
 
     def _register_aeg_tpfs(self, source_dir: Path, check_dcx_mode: CheckDCXMode = CheckDCXMode.DCX_ONLY):
-        """Find AEG TPFs in an adjacent 'aet' directory. Always uses DCX in games that use it."""
+        """Find AEG TPFs in an adjacent 'aet' directory. Always uses DCX in games that use it.
+
+        NOTE: AEG assets can use any other assets' textures as well, but their names give away the location.
+        """
         aeg_directory_match = AEG_STEM_RE.match(source_dir.name)
         if not aeg_directory_match:
             _LOGGER.warning("GEOMBND not located in an AEG folder (`aegXXX`). Cannot find AEG TPFs.")
             return
-        aet_directory = source_dir / "../../aet"
+        aet_directory = source_dir / f"../../aet/aet{aeg_directory_match.group(1)}"
         if not aet_directory.is_dir():
             _LOGGER.warning(f"`aet` directory does not exist: {aet_directory}. Cannot find AEG TPFs.")
             return
@@ -443,7 +456,7 @@ class ImageImportManager:
         binder_path = self._binder_paths.pop(binder_stem)
         self._scanned_binder_paths.add(binder_path)
         binder = Binder.from_path(binder_path)
-        for tpf_entry in binder.find_entries_matching_name(TPF_RE):
+        for tpf_entry in binder.find_entries_by_name_regex(TPF_RE):
             tpf_entry_stem = lower_stem(tpf_entry)
             if tpf_entry_stem not in self._scanned_tpf_sources:
                 self._pending_tpf_sources.setdefault(tpf_entry_stem, tpf_entry)

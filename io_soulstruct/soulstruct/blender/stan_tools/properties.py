@@ -7,8 +7,8 @@ __all__ = [
 
 import bpy
 
-from soulstruct.blender.bpy_base.property_group import SoulstructPropertyGroup
-from soulstruct.blender.animation.utilities import get_active_flver_or_part_armature
+from ..bpy_base.property_group import SoulstructPropertyGroup
+from ..animation.utilities import get_active_flver_or_part_armature
 
 from .mesh_mask_visibility import apply_draw_mask_to_character, show_all_character_meshes
 from .npc_param import find_character_armature, get_npc_param_variants_for_model
@@ -18,6 +18,7 @@ from .weapon_anim import list_c0000_sub_anibnd_stems
 from .weapon_attack_slots import ATTACK_SLOTS
 from .regulation_bin import resolve_regulation_bin_dir
 from .nr_poi import load_map_seeds
+from ..base.register import io_soulstruct_pointer_property, io_soulstruct_properties
 
 
 def _weapon_attack_slot_items(self, context) -> list[tuple[str, str, str]]:
@@ -48,6 +49,8 @@ def _on_npc_param_row_changed(self, context: bpy.types.Context) -> None:
     self.apply_active_npc_param(context)
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "stan_tools_settings")
 class StanToolsSettings(SoulstructPropertyGroup):
     """Per-scene settings for Stan's Tools workflow."""
 

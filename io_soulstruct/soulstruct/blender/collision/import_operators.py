@@ -14,10 +14,9 @@ __all__ = [
     "ImportMapHKXMapCollision",
 ]
 
+import re
 import shutil
 import tempfile
-
-import re
 import traceback
 import typing as tp
 from pathlib import Path
@@ -25,11 +24,13 @@ from pathlib import Path
 import bpy
 
 from soulstruct.containers import BinderEntry, EntryNotFoundError
-from soulstruct.games import DARK_SOULS_PTDE, DEMONS_SOULS
+from soulstruct.games import GameType
 from soulstruct.havok.fromsoft.shared import MapCollisionModel, BothResHKXBHD
 
-from soulstruct.blender.exceptions import MapCollisionImportError
-from soulstruct.blender.utilities import *
+from ..base.operators import *
+from ..base.register import io_soulstruct_operator
+from ..exceptions import MapCollisionImportError
+from ..utilities import *
 from .types import BlenderMapCollision
 
 HKX_NAME_RE = re.compile(r".*\.hkx(\.dcx)?")
@@ -39,10 +40,11 @@ HKXBHD_NAME_RE = re.compile(r"^[hl].*\.hkxbhd(\.dcx)?$")
 class HKXImportInfo(tp.NamedTuple):
     """Holds information about a HKX to import into Blender."""
     model_name: str
-    hi_collision: MapCollisionModel
-    lo_collision: MapCollisionModel
+    hi_collision: MapCollisionModel  # required
+    lo_collision: MapCollisionModel | None  # optional
 
 
+@io_soulstruct_operator
 class ImportAnyHKXMapCollision(LoggingImportOperator):
     """Most generic importer. Loads standalone HKX files or HKX entries from a HKXBHD Binder (one/all)."""
 
@@ -94,10 +96,15 @@ class ImportAnyHKXMapCollision(LoggingImportOperator):
                 if self.import_all_from_binder:
                     both_res_hkxbhd.hi_res.load_all()
                     both_res_hkxbhd.lo_res.load_all()
-                    import_infos.extend([
-                        HKXImportInfo(f"h{hkx_stem}", hi_collision, lo_collision)
-                        for hkx_stem, (hi_collision, lo_collision) in both_res_hkxbhd.get_both_res_dict()
-                    ])
+
+                    for hkx_stem, (hi_collision, lo_collision) in both_res_hkxbhd.get_both_res_dict().items():
+                        if not hi_collision:
+                            self.warning(f"Skipping lo-res collision 'l{hkx_stem}' in {file_path.name} with no hi-res.")
+                            continue
+                        if not lo_collision:
+                            self.warning(f"Importing hi-res collision 'h{hkx_stem}' without a lo-res collision.")
+                            # Import permitted.
+                        import_infos.append(HKXImportInfo(f"h{hkx_stem}", hi_collision, lo_collision))
                 elif self.collision_model_id != -1:
                     hi_hkx_entries = [
                         entry for entry in both_res_hkxbhd.hi_res.entries if self.check_hkx_entry_model_id(entry)
@@ -124,7 +131,7 @@ class ImportAnyHKXMapCollision(LoggingImportOperator):
                     # Import single specified collision model.
                     import_infos.append(
                         HKXImportInfo(
-                            hi_hkx_entries[0].minimal_stem,
+                            hi_hkx_entries[0].stem,
                             hi_hkx_entries[0].to_binary_file(MapCollisionModel),
                             lo_hkx_entries[0].to_binary_file(MapCollisionModel),
                         )
@@ -140,6 +147,7 @@ class ImportAnyHKXMapCollision(LoggingImportOperator):
                     self.warning(f"Error occurred while reading HKX file '{file_path.name}': {ex}")
                 else:
                     if file_path.name.startswith("h"):
+                        # Loose hi-res collision was read. Look for adjacent lo-res version.
                         hi_collision = collision
                         try:
                             lo_collision = MapCollisionModel.from_path(file_path.parent / f"l{file_path.name[1:]}")
@@ -147,14 +155,15 @@ class ImportAnyHKXMapCollision(LoggingImportOperator):
                             self.warning(f"Could not find matching 'lo' HKX next to '{file_path.name}'.")
                             lo_collision = None
                     elif file_path.name.startswith("l"):
+                        # Loose lo-res collision was read. Look for adjacent hi-res version.
                         lo_collision = collision
                         try:
                             hi_collision = MapCollisionModel.from_path(file_path.parent / f"h{file_path.name[1:]}")
                         except FileNotFoundError:
-                            self.warning(f"Could not find matching 'hi' HKX next to '{file_path.name}'.")
-                            hi_collision = None
+                            return self.error(f"Could not find matching 'hi' HKX next to '{file_path.name}'.")
                     else:
-                        hi_collision = collision  # treat unknown file name as hi-res
+                        # Unknown collision file name prefix. Assume hi-res.
+                        hi_collision = collision
                         lo_collision = None
                     import_infos.append(HKXImportInfo(file_path.name.split(".")[0], hi_collision, lo_collision))
 
@@ -172,8 +181,8 @@ class ImportAnyHKXMapCollision(LoggingImportOperator):
                 BlenderMapCollision.new_from_soulstruct_obj(
                     self,
                     context,
-                    import_info.hi_collision,
-                    import_info.model_name,
+                    soulstruct_obj=import_info.hi_collision,
+                    name=import_info.model_name,
                     lo_collision=import_info.lo_collision,
                 )
             except Exception as ex:
@@ -196,6 +205,7 @@ def get_binder_entry_choices(self, context):
     return ImportHKXMapCollisionWithBinderChoice.enum_options
 
 
+@io_soulstruct_operator
 class ImportHKXMapCollisionWithBinderChoice(LoggingOperator):
     """Presents user with a choice of enums from `enum_choices` class variable (set prior).
 
@@ -222,9 +232,11 @@ class ImportHKXMapCollisionWithBinderChoice(LoggingOperator):
 
     def execute(self, context):
         model_name = f"h{self.choices_enum.split('.')[0]}"
-        hi_collision, lo_collision = self.both_res_hkxbhd.get_both_hkx_allow_missing(
-            model_name,
-        )
+        hi_collision, lo_collision = self.both_res_hkxbhd.get_both_hkx_allow_missing(model_name)
+
+        if not hi_collision:
+            return self.error(f"Could not find hi-res collision for '{model_name}' in Binder.")
+        # Lo collision is optional.
 
         try:
             BlenderMapCollision.new_from_soulstruct_obj(
@@ -258,6 +270,7 @@ class ImportHKXMapCollisionWithBinderChoice(LoggingOperator):
         bpy.ops.wm.hkx_map_collision_binder_choice_operator("INVOKE_DEFAULT")
 
 
+@io_soulstruct_operator
 class ImportMapHKXMapCollision(LoggingOperator):
     bl_idname = "import_scene.map_hkx_map_collision"
     bl_label = "Import Map Collision"
@@ -321,7 +334,7 @@ class ImportMapHKXMapCollision(LoggingOperator):
             self.temp_directory = ""
 
         settings = self.settings(context)
-        if settings.is_game(DEMONS_SOULS, DARK_SOULS_PTDE):
+        if settings.is_game(GameType.DemonsSouls, GameType.DarkSoulsPTDE):
             # HKX files are already loose. Just use map folder (oldest).
             try:
                 map_dir = settings.get_import_map_dir_path(map_stem=settings.get_oldest_map_stem_version())
@@ -333,14 +346,15 @@ class ImportMapHKXMapCollision(LoggingOperator):
 
         # Dark Souls Remastered needs an unpacked `BothResHKXBHD`.
         map_stem = settings.get_oldest_map_stem_version()
-        self.both_res_hkxbhd = self.get_both_res_hkxbhd(context)
-        if self.both_res_hkxbhd is None:
+        both_res_hkxbhd = self.get_both_res_hkxbhd(context)
+        if both_res_hkxbhd is None:
             return self.error("No Binders could be loaded for HKX Map Collision model import.")
+        self.both_res_hkxbhd = both_res_hkxbhd
 
         self.temp_directory = tempfile.mkdtemp(suffix="_" + map_stem)
         for entry in self.both_res_hkxbhd.hi_res.entries:
             # We use the index to ensure unique file names while allowing duplicate entry names (e.g. Regions).
-            file_name = f"({entry.id}) {entry.name}"  # name will include extension
+            file_name = f"({entry.entry_id}) {entry.name}"  # name will include extension
             file_path = Path(self.temp_directory, file_name)
             with file_path.open("w") as f:
                 f.write(entry.name)
@@ -355,7 +369,7 @@ class ImportMapHKXMapCollision(LoggingOperator):
         collision_pairs = []  # type: list[tuple[MapCollisionModel, MapCollisionModel]]
         settings = self.settings(context)
 
-        if settings.is_game(DEMONS_SOULS, DARK_SOULS_PTDE):
+        if settings.is_game(GameType.DemonsSouls, GameType.DarkSoulsPTDE):
             # DeS and PTDE read loose HKX files from map folder.
             file_paths = [Path(self.directory, file.name) for file in self.files]
             for path in file_paths:
@@ -407,6 +421,12 @@ class ImportMapHKXMapCollision(LoggingOperator):
             except EntryNotFoundError as ex:
                 self.error(f"Error reading HKX for '{entry_name}': {ex}")
                 return []
+            if not hi_collision:
+                self.error(f"Could not find hi-res collision for '{entry_name}' in Binder.")
+                return []
+            if not lo_collision:
+                self.error(f"Could not find lo-res collision for '{entry_name}' in Binder.")
+                return []
             collision_pairs.append((hi_collision, lo_collision))
         return collision_pairs
 
@@ -439,6 +459,7 @@ class ImportMapHKXMapCollision(LoggingOperator):
 
         # Import single HKX.
         model_name = hi_collision.path_minimal_stem  # set by `BothResHKXBHD` entry loader
+        assert isinstance(model_name, str)
         try:
             bl_map_collision = BlenderMapCollision.new_from_soulstruct_obj(
                 self, context, hi_collision, model_name, collection=collection, lo_collision=lo_collision

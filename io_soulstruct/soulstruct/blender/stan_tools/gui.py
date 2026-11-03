@@ -13,11 +13,11 @@ from pathlib import Path
 
 import bpy
 
-from soulstruct.blender.bpy_base.panel import SoulstructPanel
-from soulstruct.blender.general.properties import SoulstructSettings
+from ..bpy_base.panel import SoulstructPanel
+from ..general.properties import SoulstructSettings
 from soulstruct.games import NIGHTREIGN
-from soulstruct.blender.stan_tools.character_search import _iter_chr_directories
-from soulstruct.blender.animation.export_operators import ExportCharacterHKXAnimation
+from .character_search import _iter_chr_directories
+from ..animation.export_operators import ExportCharacterHKXAnimation
 
 from .character_search import StanSearchCharacterToImport
 from .animation_search import StanSearchCharacterAnimation
@@ -49,6 +49,7 @@ from .npc_param import _resolve_npc_param_xml_path
 from .regulation_bin import resolve_regulation_bin_dir
 from .equip_weapon_param import resolve_equip_weapon_xml_path
 from .scene_lighting import is_scene_lighting_active
+from ..base.register import io_soulstruct_panel
 
 STAN_TOOLS_CATEGORY = "Stan's Tools"
 
@@ -59,6 +60,7 @@ class _StanToolsPanel(SoulstructPanel):
     bl_category = STAN_TOOLS_CATEGORY
 
 
+@io_soulstruct_panel
 class StanSetupPanel(_StanToolsPanel):
     bl_label = "Setup"
     bl_idname = "VIEW_PT_stan_tools_setup"
@@ -80,13 +82,13 @@ class StanSetupPanel(_StanToolsPanel):
         row = layout.row(align=True)
         row.label(text="Game Root:")
         row.operator(AutoDetectGameDirectory.bl_idname, text="", icon="VIEWZOOM")
-        layout.prop(settings, settings.get_game_root_prop_name(), text="")
+        layout.prop(settings.game_settings, settings.get_game_root_prop_name(), text="")
 
         layout.label(text="Project Root (optional export workspace):")
-        layout.prop(settings, settings.get_project_root_prop_name(), text="")
+        layout.prop(settings.game_settings, settings.get_project_root_prop_name(), text="")
 
         layout.label(text="Mod Folder (DSAS / ModEngine):")
-        layout.prop(settings, settings.get_mod_root_prop_name(), text="")
+        layout.prop(settings.game_settings, settings.get_mod_root_prop_name(), text="")
 
         layout.prop(settings, "prefer_import_from_project")
         layout.prop(export_settings, "auto_repack_to_mod")
@@ -124,6 +126,7 @@ class StanSetupPanel(_StanToolsPanel):
             layout.label(text="Set Game Root or use Auto-Detect", icon="ERROR")
 
 
+@io_soulstruct_panel
 class StanCharactersPanel(_StanToolsPanel):
     bl_label = "Characters"
     bl_idname = "VIEW_PT_stan_tools_characters"
@@ -167,13 +170,14 @@ class StanCharactersPanel(_StanToolsPanel):
         box.label(text="NPC Param applies on selection; Apply re-runs if needed")
 
 
+@io_soulstruct_panel
 class StanWeaponsPanel(_StanToolsPanel):
     bl_label = "Weapons"
     bl_idname = "VIEW_PT_stan_tools_weapons"
 
     @classmethod
     def poll(cls, context):
-        from soulstruct.blender.general.properties import SoulstructSettings
+        from ..general.properties import SoulstructSettings
 
         settings = SoulstructSettings.from_context(context)
         return settings.has_import_dir_path("parts") and is_player_character_loaded(context)
@@ -219,6 +223,7 @@ class StanWeaponsPanel(_StanToolsPanel):
             layout.label(text=f"parts\\ found: {count} weapon binder(s)", icon="CHECKMARK")
 
 
+@io_soulstruct_panel
 class StanAnimationPanel(_StanToolsPanel):
     bl_label = "Animation"
     bl_idname = "VIEW_PT_stan_tools_animation"
@@ -250,6 +255,7 @@ class StanAnimationPanel(_StanToolsPanel):
             layout.label(text="Set Mod Folder in Setup to auto-copy ANIBND", icon="ERROR")
 
 
+@io_soulstruct_panel
 class StanViewportPanel(_StanToolsPanel):
     bl_label = "Viewport"
     bl_idname = "VIEW_PT_stan_tools_viewport"
@@ -280,6 +286,7 @@ class StanViewportPanel(_StanToolsPanel):
             layout.label(text="Scene lighting: OFF", icon="BLANK1")
 
 
+@io_soulstruct_panel
 class StanMapPoiPanel(_StanToolsPanel):
     bl_label = "Map POIs"
     bl_idname = "VIEW_PT_stan_tools_map_pois"

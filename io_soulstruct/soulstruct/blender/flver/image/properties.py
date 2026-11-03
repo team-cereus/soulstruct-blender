@@ -9,10 +9,13 @@ import bpy
 
 from soulstruct.containers.tpf import TPFPlatform
 
-from soulstruct.blender.bpy_base.property_group import SoulstructPropertyGroup
+from ...base.register import io_soulstruct_properties, io_soulstruct_pointer_property
+from ...bpy_base.property_group import SoulstructPropertyGroup
 from .enums import *
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Image, "DDS_TEXTURE")
 class DDSTextureProps(SoulstructPropertyGroup):
     """Used as `bpy.types.Image.DDS_TEXTURE`."""
 
@@ -54,6 +57,8 @@ class DDSTextureProps(SoulstructPropertyGroup):
     )
 
 
+@io_soulstruct_properties
+@io_soulstruct_pointer_property(bpy.types.Scene, "texture_export_settings")
 class TextureExportSettings(SoulstructPropertyGroup):
     """Contains settings and enums that determine DDS compression type for each FLVER texture slot type."""
 
@@ -68,8 +73,8 @@ class TextureExportSettings(SoulstructPropertyGroup):
 
     require_power_of_two: bpy.props.BoolProperty(
         name="Require Power of Two Size",
-        description="Require that all exported textures have power-of-two dimensions. Even if disabled, this will "
-                    "never allow 1-pixel textures to be exported",
+        description="Require that all exported textures have power-of-two dimensions (>= 2). Even if disabled, this "
+                    "will never allow 1-pixel textures to be exported, as these are typically placeholder textures",
         default=True,
     )
 

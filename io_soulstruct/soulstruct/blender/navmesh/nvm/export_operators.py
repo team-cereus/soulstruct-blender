@@ -17,15 +17,17 @@ from soulstruct.dcx import DCXType
 from soulstruct.darksouls1r.maps.navmesh import NVMBND as NVMBND_DSR
 from soulstruct.darksouls1ptde.maps.navmesh import NVMBND as NVMBND_PTDE
 from soulstruct.demonssouls.maps.navmesh import NVMBND as NVMBND_DES
-from soulstruct.games import DARK_SOULS_PTDE, DARK_SOULS_DSR, DEMONS_SOULS
+from soulstruct.games import GameType
 
-from soulstruct.blender.exceptions import SoulstructTypeError
-from soulstruct.blender.types import SoulstructType
-from soulstruct.blender.utilities.operators import *
-from soulstruct.blender.utilities.misc import *
+from ...base.operators import *
+from ...base.register import io_soulstruct_operator
+from ...exceptions import SoulstructTypeError
+from ...types import SoulstructType, MeshObject
+from ...utilities.misc import *
 from .types import *
 
 
+@io_soulstruct_operator
 class ExportAnyNVM(LoggingExportOperator):
     """Export loose NVM file from a Blender mesh.
 
@@ -47,7 +49,7 @@ class ExportAnyNVM(LoggingExportOperator):
 
     @classmethod
     def poll(cls, context) -> bool:
-        return context.active_object and context.active_object.soulstruct_type == SoulstructType.NAVMESH
+        return context.active_object is not None and context.active_object.soulstruct_type == SoulstructType.NAVMESH
 
     def invoke(self, context, _event):
         """Set default export name to name of object (before first space and without Blender dupe suffix)."""
@@ -86,6 +88,7 @@ class ExportAnyNVM(LoggingExportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportNVMIntoAnyBinder(LoggingImportOperator):
     bl_idname = "export_scene.nvm_binder"
     bl_label = "Export NVM Into Binder"
@@ -150,7 +153,7 @@ class ExportNVMIntoAnyBinder(LoggingImportOperator):
             else:
                 nvm.dcx_type = DCXType.from_member_name(self.dcx_type)  # most likely `Null` for file in `nvmbnd` Binder
 
-            matching_entries = binder.find_entries_matching_name(rf"{model_stem}\.nvm(\.dcx)?")
+            matching_entries = binder.find_entries_by_name_regex(rf"{model_stem}\.nvm(\.dcx)?")
             if not matching_entries:
                 # Create new entry.
                 if "{map}" in self.default_entry_path:
@@ -202,6 +205,7 @@ class ExportNVMIntoAnyBinder(LoggingImportOperator):
         return {"FINISHED"}
 
 
+@io_soulstruct_operator
 class ExportMapNVM(LoggingOperator):
 
     bl_idname = "export_scene.nvm_selected_map"
@@ -234,11 +238,11 @@ class ExportMapNVM(LoggingOperator):
                 "No game map directory specified in Soulstruct settings and `Detect Map from Collection` is disabled."
             )
 
-        if settings.is_game(DARK_SOULS_PTDE):
+        if settings.is_game(GameType.DarkSoulsPTDE):
             nvmbnd_class = NVMBND_PTDE
-        elif settings.is_game(DARK_SOULS_DSR):
+        elif settings.is_game(GameType.DarkSoulsDSR):
             nvmbnd_class = NVMBND_DSR
-        elif settings.is_game(DEMONS_SOULS):
+        elif settings.is_game(GameType.DemonsSouls):
             nvmbnd_class = NVMBND_DES
         else:
             return self.error(f"Unsupported game: {settings.game}")
@@ -246,12 +250,19 @@ class ExportMapNVM(LoggingOperator):
         opened_nvmbnds = {}  # type: dict[Path, BaseNVMBND]
         bl_nvms = BlenderNVM.from_selected_objects(context, sort=True)  # type: list[BlenderNVM]
 
-        export_loose_des_nvms = settings.is_game(DEMONS_SOULS) and settings.des_export_debug_files
+        export_loose_des_nvms = settings.is_game(GameType.DemonsSouls) and settings.demonssouls.export_debug_files
         loose_nvms_to_export = []  # type: list[tuple[NVM, Path]]
 
         for bl_nvm in bl_nvms:
             # NVMBND files come from latest 'map' folder version.
             map_stem = settings.get_map_stem_for_export(bl_nvm.obj, latest=True)
+
+            if not map_stem:
+                self.error(
+                    f"Cannot detect a map stem for `{bl_nvm.name}` (and none set in settings)."
+                )
+                continue
+
             relative_nvmbnd_path = Path(f"map/{map_stem}/{map_stem}.nvmbnd")
 
             if relative_nvmbnd_path not in opened_nvmbnds:
@@ -272,8 +283,7 @@ class ExportMapNVM(LoggingOperator):
                 nvm = bl_nvm.to_soulstruct_obj(self, context)
             except Exception as ex:
                 traceback.print_exc()
-                self.error(f"Cannot get exported NVM. Error: {ex}")
-                continue
+                return self.error(f"Cannot get exported NVM {bl_nvm.name}. Error: {ex}")
             else:
                 nvm.dcx_type = DCXType.Null  # no DCX compression inside NVMBND
 
@@ -290,7 +300,7 @@ class ExportMapNVM(LoggingOperator):
                 entry.entry_id = i
             exported_paths += settings.export_file(self, nvmbnd, relative_nvmbnd_path)
 
-        if settings.is_game(DEMONS_SOULS) and settings.des_export_debug_files and loose_nvms_to_export:
+        if settings.is_game(GameType.DemonsSouls) and settings.demonssouls.export_debug_files and loose_nvms_to_export:
             # Export loose NVMs next to NVMBND.
             for nvm, relative_nvm_path in loose_nvms_to_export:
                 exported_paths += settings.export_file(self, nvm, relative_nvm_path)

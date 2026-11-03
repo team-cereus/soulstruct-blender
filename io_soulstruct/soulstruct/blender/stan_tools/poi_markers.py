@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import bpy
 
-from soulstruct.blender.utilities.conversion import to_blender
+from ..utilities.conversion import to_blender
 from soulstruct.utilities.maths import Vector3
 
 from .nr_poi import AttachPoint, PoiDefine, SeedPoi, attach_msb_stem, game_world_position, map_id_str
@@ -307,7 +307,7 @@ def import_poi_tile_catalog_markers(
     from .poi_catalog import set_catalog_tile_ids
     from .poi_map_tiles import show_poi_catalog_tile
 
-    from soulstruct.blender.general.properties import SoulstructSettings
+    from ..general.properties import SoulstructSettings
 
     stan = context.scene.stan_tools_settings
     settings = SoulstructSettings.from_context(context)

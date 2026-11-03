@@ -9,12 +9,15 @@ __all__ = [
 
 import bpy
 
-from soulstruct.blender.bpy_base.panel import SoulstructPanel
+from ..base.register import io_soulstruct_panel
+from ..bpy_base.panel import SoulstructPanel
+from .generators import *
 from .misc_mesh import *
 from .misc_other import *
 from .misc_outliner import *
 
 
+@io_soulstruct_panel
 class MiscSoulstructMeshOperatorsPanel(SoulstructPanel):
 
     bl_label = "Mesh Operators"
@@ -26,6 +29,8 @@ class MiscSoulstructMeshOperatorsPanel(SoulstructPanel):
 
     def draw(self, context):
         layout = self.layout
+        if not layout:
+            return
 
         layout.label(text="Mesh Tools:")
         layout.operator(CopyMeshSelectionOperator.bl_idname)
@@ -40,7 +45,13 @@ class MiscSoulstructMeshOperatorsPanel(SoulstructPanel):
         layout.operator(WeightVerticesWithFalloff.bl_idname)
         layout.operator(ApplyModifierNonSingleUser.bl_idname)
 
+        layout.label(text="Mesh Gen:")
+        layout.operator(GenerateRock.bl_idname)
+        layout.operator(GenerateBrick.bl_idname)
+        layout.operator(GenerateSlab.bl_idname)
 
+
+@io_soulstruct_panel
 class MiscSoulstructCollectionOperatorsPanel(SoulstructPanel):
 
     bl_label = "Collection Operators"
@@ -51,6 +62,8 @@ class MiscSoulstructCollectionOperatorsPanel(SoulstructPanel):
 
     def draw(self, context):
         layout = self.layout
+        if not layout:
+            return
 
         self.draw_active_map(context, layout)
 
@@ -161,6 +174,7 @@ def _are_all_collections_hidden(context: bpy.types.Context, pattern_str: str) ->
     return all(coll.hide_viewport for coll in colls)
 
 
+@io_soulstruct_panel
 class MiscSoulstructOtherOperatorsPanel(SoulstructPanel):
 
     bl_label = "Other Operators"
@@ -172,4 +186,6 @@ class MiscSoulstructOtherOperatorsPanel(SoulstructPanel):
 
     def draw(self, context):
         layout = self.layout
+        if not layout:
+            return
         layout.operator(PrintGameTransform.bl_idname)
