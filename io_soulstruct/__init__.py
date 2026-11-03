@@ -32,19 +32,22 @@ site.addsitedir(user_addon_modules)
 def _ensure_soulstruct_installed():
     """Check that required modules are available."""
 
-    try:
-        import soulstruct.base
-        import soulstruct.havok
-        import pyrelink
-    except ImportError as ex:
-        # Reintall below.
-        print(f"Import error: {ex}")
-        print(
-            "Could not detect `soulstruct` and/or `soulstruct-havok` modules in Blender's Python environment. "
-            "Will reinstall now to Blender's local user 'scripts/addons/modules' folder."
-        )
-    else:
+    # Only look the packages up here, without importing them: importing `soulstruct.havok` loads `scipy`/`numpy` DLLs
+    # from `modules`, and Windows then refuses to let the pip install below replace them ("Access is denied").
+    def _found(name: str) -> bool:
+        try:
+            return importlib.util.find_spec(name) is not None
+        except ModuleNotFoundError:  # parent package (`soulstruct`) missing entirely
+            return False
+
+    missing = [name for name in ("soulstruct.base", "soulstruct.havok", "pyrelink") if not _found(name)]
+    if not missing:
         return
+    print(f"Import error: No module named {', '.join(missing)}")
+    print(
+        "Could not detect `soulstruct` and/or `soulstruct-havok` modules in Blender's Python environment. "
+        "Will reinstall now to Blender's local user 'scripts/addons/modules' folder."
+    )
 
     # Install editable `soulstruct` and `soulstruct-havok` modules into Python environment from `io_soulstruct_lib`.
     io_soulstruct_lib_path = (Path(__file__).parent / "../io_soulstruct_lib").resolve()
