@@ -44,7 +44,7 @@ S:\_modding\tools\soulstruct-blender\        ← open THIS in PyCharm
 ├── io_soulstruct\                            ← Blender add-on (UI/operators only)
 │   └── soulstruct\blender\                   ← the `soulstruct.blender` package
 ├── io_soulstruct_lib\
-│   ├── soulstruct\                           ← submodule: git@github.com:team-cereus/soulstruct.git (main, 2.4.0)
+│   ├── soulstruct\                           ← submodule: https://github.com/team-cereus/soulstruct.git (main, 2.4.0)
 │   └── soulstruct-havok\                      ← submodule: team-cereus/soulstruct-havok (upstream Grimrukh, 1.3.0)
 ├── .gitmodules
 └── DEV_ER_ANIMATION.md                       ← this file
@@ -55,7 +55,7 @@ S:\_modding\tools\soulstruct-blender\        ← open THIS in PyCharm
 ```ini
 [submodule "io_soulstruct_lib/soulstruct"]
 	path = io_soulstruct_lib/soulstruct
-	url = git@github.com:team-cereus/soulstruct.git
+	url = https://github.com/team-cereus/soulstruct.git
 [submodule "io_soulstruct_lib/soulstruct-havok"]
 	path = io_soulstruct_lib/soulstruct-havok
 	url = https://github.com/team-cereus/soulstruct-havok.git

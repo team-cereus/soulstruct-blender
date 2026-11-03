@@ -1,6 +1,6 @@
 [submodule "io_soulstruct_lib/soulstruct"]
 	path = io_soulstruct_lib/soulstruct
-	url = git@github.com:team-cereus/soulstruct.git
+	url = https://github.com/team-cereus/soulstruct.git
 [submodule "io_soulstruct_lib/soulstruct-havok"]
 	path = io_soulstruct_lib/soulstruct-havok
 	url = https://github.com/team-cereus/soulstruct-havok.git

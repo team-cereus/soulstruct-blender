@@ -8,6 +8,14 @@ This repository is a **development fork** with Elden Ring / Nightreign HK2018 an
 **Stan's Tools** (sidebar workflow for character search, NPC mesh variants, mod-folder export), and
 `soulstruct` / `soulstruct-havok` submodules under `io_soulstruct_lib/`.
 
+**Just want to use it?** Close Blender and run this in PowerShell (Windows); it installs and keeps itself up to date:
+
+```powershell
+irm https://raw.githubusercontent.com/team-cereus/soulstruct-blender/main/installer/install.ps1 | iex
+```
+
+Details, updates and uninstall: [`installer/README.md`](installer/README.md).
+
 | Doc | Contents |
 |-----|----------|
 | [`docs/STAN_TOOLS_WORKFLOW.md`](docs/STAN_TOOLS_WORKFLOW.md) | Full animator pipeline: Blender ↔ DSAS ↔ ModEngine, tools used, troubleshooting |
