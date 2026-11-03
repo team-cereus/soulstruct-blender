@@ -13,7 +13,7 @@ from pathlib import Path
 
 import bpy
 
-from ..flver.models.operators.import_operators import ImportEquipmentFLVER
+from ..base.operators import LoggingOperator
 from ..general.weapon_names import get_weapon_index
 
 from .debug_log import stan_debug, stan_info, stan_warning
@@ -101,8 +101,12 @@ def build_weapon_search_items(context: bpy.types.Context) -> list[tuple[str, str
 
 
 @io_soulstruct_operator
-class StanSearchWeaponToImport(ImportEquipmentFLVER):
-    """Import weapon FLVER by EquipParamWeapon row id (Stan's Tools)."""
+class StanSearchWeaponToImport(LoggingOperator):
+    """Import weapon FLVER by EquipParamWeapon row id (Stan's Tools).
+
+    Not a subclass of the registered `ImportEquipmentFLVER`: registering a subclass of a registered operator
+    detaches the parent's Python class from its RNA type, which breaks `import_scene.equipment_flver`.
+    """
 
     bl_idname = "stan_tools.search_weapon"
     bl_label = "Search Weapon by Name"

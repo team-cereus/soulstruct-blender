@@ -16,7 +16,7 @@ def resolve_stan_character_context(
     Uses the active FLVER selection when possible, otherwise the last imported
     character from Stan's Tools settings.
     """
-    armature_obj, mesh_obj, model_name, is_part = get_active_flver_or_part_armature(context)
+    armature_obj, mesh_obj, model_name, is_part, _ = get_active_flver_or_part_armature(context)
     if armature_obj and model_name.startswith("c") and not is_part:
         return armature_obj, mesh_obj, model_name[:5].lower() if len(model_name) >= 5 else model_name.lower()
 

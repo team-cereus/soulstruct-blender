@@ -13,7 +13,7 @@ from pathlib import Path
 import bpy
 
 from ..general.character_names import get_character_name_map
-from ..flver.models.operators.import_operators import ImportCharacterFLVER
+from ..flver.models.operators.import_operators import ImportCharacterFLVER, _BaseFLVERImportOperator
 from ..base.register import io_soulstruct_operator
 
 _CHR_BND_RE = re.compile(r"^(c\d+)\.chrbnd(\.dcx)?(\.bak)?$", re.IGNORECASE)
@@ -84,8 +84,12 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
 
 
 @io_soulstruct_operator
-class StanSearchCharacterToImport(ImportCharacterFLVER):
-    """Import a character FLVER by searchable name/id (Stan's Tools only)."""
+class StanSearchCharacterToImport(_BaseFLVERImportOperator):
+    """Import a character FLVER by searchable name/id (Stan's Tools only).
+
+    Not a subclass of the registered `ImportCharacterFLVER` (that detaches its Python class from its RNA type and
+    breaks `import_scene.character_flver`), so its character-specific pieces are borrowed below.
+    """
 
     bl_idname = "stan_tools.search_character"
     bl_label = "Search Character by Name"
@@ -96,6 +100,12 @@ class StanSearchCharacterToImport(ImportCharacterFLVER):
     bl_options = {"REGISTER", "UNDO"}
 
     bl_property = "character"
+
+    DEFAULT_SUBDIR = ImportCharacterFLVER.DEFAULT_SUBDIR
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
+    directory: bpy.props.StringProperty(options={'HIDDEN'}, subtype="DIR_PATH")
+    post_process_flver = ImportCharacterFLVER.post_process_flver
+    get_collection = ImportCharacterFLVER.get_collection
 
     _search_items: list[tuple[str, str, str]] = [("", "", "")]
 

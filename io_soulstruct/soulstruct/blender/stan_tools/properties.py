@@ -343,7 +343,7 @@ class StanToolsSettings(SoulstructPropertyGroup):
         if model_stem:
             self.character_model = model_stem
         elif not self.character_model:
-            armature, _, name, is_part = get_active_flver_or_part_armature(context)
+            armature, _, name, is_part, _ = get_active_flver_or_part_armature(context)
             if armature and name.startswith("c") and not is_part:
                 self.character_model = name[:5].lower() if len(name) >= 5 else name.lower()
 

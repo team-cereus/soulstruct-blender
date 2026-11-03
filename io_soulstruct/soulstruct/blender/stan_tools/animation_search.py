@@ -56,7 +56,7 @@ def build_character_animation_search_items(
     items: list[tuple[str, str, str]] = []
     for entry in sorted(entries, key=lambda e: e.name):
         label = label_for_animation_entry(entry, tae_labels)
-        items.append((str(entry.id), label, f"Import {entry.name} from {model_name} ANIBND"))
+        items.append((str(entry.entry_id), label, f"Import {entry.name} from {model_name} ANIBND"))
     return items
 
 
