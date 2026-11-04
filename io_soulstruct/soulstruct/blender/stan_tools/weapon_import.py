@@ -64,6 +64,16 @@ def hide_weapon_variant_armatures(
     return hidden
 
 
+def _frame_selected(context: bpy.types.Context):
+    """Frame the selection. `view_selected` needs the 3D View's WINDOW region; the sidebar's operators run in its UI."""
+    areas = context.screen.areas if context.screen else ()
+    area = next((a for a in areas if a.type == "VIEW_3D"), None)
+    region = next((r for r in area.regions if r.type == "WINDOW"), None) if area else None
+    if region is not None:
+        with context.temp_override(area=area, region=region):
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+
+
 def _binder_stem_from_path(partsbnd_path: Path) -> str:
     match = _WEAPON_PARTS_BND_RE.match(partsbnd_path.name)
     if match:
@@ -143,7 +153,7 @@ def import_weapon_partsbnd(operator, context: bpy.types.Context, partsbnd_path: 
         if bl_flver.armature is not None:
             tag_weapon_objects(context, bl_flver.armature)
         operator.set_active_obj(bl_flver.mesh)
-        bpy.ops.view3d.view_selected(use_all_regions=False)
+        _frame_selected(context)
 
     stan_info(operator, f"Imported primary weapon mesh {binder_stem} from {partsbnd_path.name}.")
     return {"FINISHED"}

@@ -66,7 +66,9 @@ def get_flvers_from_binder(
             flvers.append(pyre_flver.FLVER.from_bytes(data))
         except RuntimeError:
             # pyrelink 0.3.4 cannot read Nightreign FLVERs (version 0x20021: non-zero header padding at offset 116).
-            flvers.append(FLVER.from_bytes(data))
+            flver = FLVER.from_bytes(data)
+            flver.path = Path(entry.name)  # `from_bytes` leaves it unset, and callers name models from it
+            flvers.append(flver)
     return flvers
 
 

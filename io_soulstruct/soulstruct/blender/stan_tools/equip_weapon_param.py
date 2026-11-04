@@ -86,11 +86,11 @@ def get_weapon_row(
     if xml_path is not None:
         xml_row = _load_xml_rows(str(xml_path), xml_path.stat().st_mtime_ns).get(row_id, {})
 
-    if not index_entry and not xml_row:
-        return None
-
     name = (index_entry or {}).get("name", f"Weapon {row_id}")
     equip_model_id = xml_row.get("equipModelId") or (index_entry or {}).get("equipModelId", 0)
+    if not index_entry and not xml_row:
+        # `build_weapon_search_items` also lists models on disk with no param row, as row id = model id * 10000 or 1000.
+        equip_model_id = row_id // (10000 if settings.is_er_family() else 1000)
     wepmotion = xml_row.get("wepmotionCategory") or (index_entry or {}).get("wepmotionCategory", 0)
     absorp_param_id = xml_row.get("absorpParamId", -1)
     stem = (index_entry or {}).get("stem", "")
