@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import bmesh
+
 
 
 import bpy
@@ -36,7 +38,7 @@ _MESH_SPLIT_PROP = "stan_mesh_mask_split"
 
 _SPLIT_VERSION_PROP = "stan_mesh_mask_split_version"
 
-_SPLIT_VERSION = 4
+_SPLIT_VERSION = 5  # 5: parts keep UVs, vertex colors and normals
 
 _SOURCE_MESH_PROP = "stan_source_mesh"
 
@@ -71,86 +73,6 @@ def _face_mask_id(mesh: bpy.types.Mesh, material_index: int) -> int:
     mid = material_display_mask_id(mesh.materials[material_index])
 
     return mid if mid is not None else -1
-
-
-
-
-
-def _copy_vertex_groups_subset(
-
-    source_obj: bpy.types.Object,
-
-    target_obj: bpy.types.Object,
-
-    source_vert_indices: list[int],
-
-) -> None:
-
-    """``source_vert_indices[new_vert_index]`` is the vertex index on ``source_obj``."""
-
-    mesh = source_obj.data
-
-    if not isinstance(mesh, bpy.types.Mesh) or not source_obj.vertex_groups:
-
-        return
-
-
-
-    new_groups = [target_obj.vertex_groups.new(name=vg.name) for vg in source_obj.vertex_groups]
-
-    for new_idx, src_idx in enumerate(source_vert_indices):
-
-        if src_idx < 0 or src_idx >= len(mesh.vertices):
-
-            continue
-
-        for membership in mesh.vertices[src_idx].groups:
-
-            if membership.weight <= 0.0:
-
-                continue
-
-            new_groups[membership.group].add((new_idx,), membership.weight, "ADD")
-
-
-
-
-
-def _copy_armature_modifier(source: bpy.types.Object, target: bpy.types.Object) -> None:
-
-    for mod in source.modifiers:
-
-        if mod.type != "ARMATURE":
-
-            continue
-
-        new_mod = target.modifiers.new(name=mod.name, type="ARMATURE")
-
-        new_mod.object = mod.object
-
-        new_mod.use_vertex_groups = mod.use_vertex_groups
-
-        new_mod.use_deform_preserve_volume = mod.use_deform_preserve_volume
-
-        new_mod.vertex_group = mod.vertex_group
-
-        new_mod.invert_vertex_group = mod.invert_vertex_group
-
-        new_mod.show_viewport = True
-
-        new_mod.show_render = True
-
-        return
-
-    armature = source.parent if source.parent and source.parent.type == "ARMATURE" else None
-
-    if armature is None:
-
-        return
-
-    new_mod = target.modifiers.new(name="FLVER Armature", type="ARMATURE")
-
-    new_mod.object = armature
 
 
 
@@ -252,161 +174,31 @@ def _polygons_by_mask(mesh: bpy.types.Mesh) -> dict[int, list[int]]:
 
 
 
-def _build_mesh_from_polygons(
-
-    source_mesh: bpy.types.Mesh,
-
-    poly_indices: list[int],
-
-) -> tuple[bpy.types.Mesh, list[int]] | None:
-
-    """Return new mesh data and ``source_vert_indices[new_index] -> source vert index``."""
-
-    if not poly_indices:
-
-        return None
-
-
-
-    old_to_new: dict[int, int] = {}
-
-    verts: list[tuple[float, float, float]] = []
-
-    faces: list[list[int]] = []
-
-
-
-    for poly_i in poly_indices:
-
-        poly = source_mesh.polygons[poly_i]
-
-        face: list[int] = []
-
-        for loop_i in range(poly.loop_start, poly.loop_start + poly.loop_total):
-
-            vi = source_mesh.loops[loop_i].vertex_index
-
-            new_vi = old_to_new.get(vi)
-
-            if new_vi is None:
-
-                new_vi = len(verts)
-
-                old_to_new[vi] = new_vi
-
-                co = source_mesh.vertices[vi].co
-
-                verts.append((co.x, co.y, co.z))
-
-            face.append(new_vi)
-
-        faces.append(face)
-
-
-
-    new_mesh = bpy.data.meshes.new(f"{source_mesh.name}_part")
-
-    new_mesh.from_pydata(verts, [], faces)
-
-    for new_poly, src_poly_i in zip(new_mesh.polygons, poly_indices):
-        new_poly.material_index = source_mesh.polygons[src_poly_i].material_index
-
-    new_mesh.update()
-
-
-
-    source_vert_indices = [0] * len(verts)
-
-    for old_vi, new_vi in old_to_new.items():
-
-        source_vert_indices[new_vi] = old_vi
-
-    return new_mesh, source_vert_indices
-
-
-
-
-
 def _extract_mask_submesh(
-
     source_obj: bpy.types.Object,
-
-    armature_obj: bpy.types.Object,
-
     target_mask: int,
-
     poly_indices: list[int],
-
 ) -> bpy.types.Object | None:
+    """Create one skinned copy of `source_obj` with only the faces for ``target_mask`` (-1 = unmasked).
 
-    """Create one skinned child mesh containing only faces for ``target_mask`` (-1 = unmasked)."""
-
-    mesh = source_obj.data
-
-    if not isinstance(mesh, bpy.types.Mesh):
-
-        return None
-
-
-
-    built = _build_mesh_from_polygons(mesh, poly_indices)
-
-    if built is None:
-
-        return None
-
-    new_mesh, source_vert_indices = built
-
-
-
-    for mat in mesh.materials:
-
-        new_mesh.materials.append(mat)
-
-
+    Copies the mesh and deletes the other faces, so UVs, vertex colors, normals and vertex groups all survive.
+    """
+    keep = set(poly_indices)
+    new_mesh = source_obj.data.copy()
+    bm = bmesh.new()
+    bm.from_mesh(new_mesh)
+    bmesh.ops.delete(bm, geom=[face for face in bm.faces if face.index not in keep], context="FACES")
+    bm.to_mesh(new_mesh)
+    bm.free()
 
     suffix = "base" if target_mask < 0 else f"mask{target_mask:02d}"
-
-    new_name = f"{source_obj.name}_{suffix}"
-
-    new_mesh.name = new_name
-
-    new_obj = bpy.data.objects.new(new_name, new_mesh)
-
-    _copy_vertex_groups_subset(source_obj, new_obj, source_vert_indices)
-
-    if hasattr(source_obj, "soulstruct_type"):
-
-        new_obj.soulstruct_type = source_obj.soulstruct_type
-
+    new_obj = source_obj.copy()  # keeps parent, transform, vertex groups, Armature modifier and Soulstruct properties
+    new_obj.data = new_mesh
+    new_obj.name = new_mesh.name = f"{source_obj.name}_{suffix}"
     for collection in source_obj.users_collection:
-
-        if new_obj.name not in collection.objects:
-
-            collection.objects.link(new_obj)
-
-
-
-    new_obj.parent = armature_obj
-
-    new_obj.matrix_parent_inverse = source_obj.matrix_parent_inverse.copy()
-
-    new_obj.location = source_obj.location.copy()
-
-    new_obj.rotation_euler = source_obj.rotation_euler.copy()
-
-    new_obj.scale = source_obj.scale.copy()
-
-
-
-    _copy_armature_modifier(source_obj, new_obj)
-
+        collection.objects.link(new_obj)
     new_obj[_DISPLAY_MASK_PROP] = target_mask
-
     return new_obj
-
-
-
 
 
 def ensure_mesh_parts_split(context: bpy.types.Context, armature_obj: bpy.types.Object) -> None:
@@ -450,6 +242,8 @@ def ensure_mesh_parts_split(context: bpy.types.Context, armature_obj: bpy.types.
 
 
     polys_by_mask = _polygons_by_mask(mesh)
+    if not polys_by_mask.keys() - {-1}:
+        return  # nothing is masked, so there is nothing to split
 
     wm = context.window_manager
 
@@ -473,7 +267,7 @@ def ensure_mesh_parts_split(context: bpy.types.Context, armature_obj: bpy.types.
 
                 wm.progress_update(step)
 
-            if _extract_mask_submesh(source, armature_obj, mask_id, polys_by_mask[mask_id]) is not None:
+            if _extract_mask_submesh(source, mask_id, polys_by_mask[mask_id]) is not None:
 
                 created += 1
 

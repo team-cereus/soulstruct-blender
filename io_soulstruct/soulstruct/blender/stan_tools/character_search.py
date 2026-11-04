@@ -14,6 +14,7 @@ import bpy
 
 from ..general.character_names import get_character_name_map
 from ..flver.models.operators.import_operators import ImportCharacterFLVER, _BaseFLVERImportOperator
+from .list_picker import ListPickerMixin
 from ..base.register import io_soulstruct_operator
 
 _CHR_BND_RE = re.compile(r"^(c\d+)\.chrbnd(\.dcx)?(\.bak)?$", re.IGNORECASE)
@@ -84,7 +85,7 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
 
 
 @io_soulstruct_operator
-class StanSearchCharacterToImport(_BaseFLVERImportOperator):
+class StanSearchCharacterToImport(ListPickerMixin, _BaseFLVERImportOperator):
     """Import a character FLVER by searchable name/id (Stan's Tools only).
 
     Not a subclass of the registered `ImportCharacterFLVER` (that detaches its Python class from its RNA type and
@@ -99,7 +100,8 @@ class StanSearchCharacterToImport(_BaseFLVERImportOperator):
     )
     bl_options = {"REGISTER", "UNDO"}
 
-    bl_property = "character"
+    picker_recent_key = "characters"
+    picker_confirm_text = "Import"
 
     DEFAULT_SUBDIR = ImportCharacterFLVER.DEFAULT_SUBDIR
     files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
@@ -126,10 +128,10 @@ class StanSearchCharacterToImport(_BaseFLVERImportOperator):
         StanSearchCharacterToImport._search_items = build_character_search_items(context)
         if len(StanSearchCharacterToImport._search_items) == 1 and not StanSearchCharacterToImport._search_items[0][0]:
             return self.error(StanSearchCharacterToImport._search_items[0][1])
-        context.window_manager.invoke_search_popup(self)
-        return {"RUNNING_MODAL"}
+        return self.open_picker(context, StanSearchCharacterToImport._search_items)
 
     def execute(self, context):
+        self.character = self.picked(context, self.character)
         if not self.character:
             return self.error("No character selected.")
 
@@ -152,9 +154,8 @@ class StanSearchCharacterToImport(_BaseFLVERImportOperator):
             stan = context.scene.stan_tools_settings
             has_npc_param = stan.refresh_npc_param_list(context, self.character)
             if has_npc_param:
-                self.info(
-                    f"Imported {self.character}. Pick an NPC Param row to show the correct mesh parts."
-                )
+                stan.apply_active_npc_param(context)
+                self.info(f"Imported {self.character}. Pick an NPC Param row to switch its visible parts.")
             else:
                 self.info(f"Imported {self.character}.")
         return result

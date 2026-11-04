@@ -29,7 +29,17 @@ def _weapon_attack_slot_items(self, context) -> list[tuple[str, str, str]]:
 
 
 def _npc_param_enum_items(self, context) -> list[tuple[str, str, str]]:
-    return StanToolsSettings._npc_param_items
+    items = StanToolsSettings._npc_param_items
+    if context is not None and self.character_model and not items[0][0]:
+        # The list lives in memory only, so it is empty again after reopening a .blend.
+        variants = get_npc_param_variants_for_model(
+            context.scene.soulstruct_settings, self, self.character_model
+        )
+        if variants:
+            items = StanToolsSettings._npc_param_items = [
+                (str(v.row_id), v.label, f"NpcParam row {v.row_id}") for v in variants
+            ]
+    return items
 
 
 def _c0000_sub_anibnd_enum_items(self, context) -> list[tuple[str, str, str]]:
@@ -289,6 +299,7 @@ class StanToolsSettings(SoulstructPropertyGroup):
         name="NPC Param",
         description="NpcParam row controlling which #XX# masked mesh parts are visible (like DSAS)",
         items=_npc_param_enum_items,
+        update=_on_npc_param_row_changed,
     )
 
     scene_lighting_sky_strength: bpy.props.FloatProperty(
@@ -343,7 +354,7 @@ class StanToolsSettings(SoulstructPropertyGroup):
         """Assign enum by identifier; avoids TypeError when items just changed."""
         StanToolsSettings._suppress_npc_param_update = True
         try:
-            self["npc_param_row_id"] = row_id
+            self.npc_param_row_id = row_id
         finally:
             StanToolsSettings._suppress_npc_param_update = False
 
