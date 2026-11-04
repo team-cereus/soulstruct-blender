@@ -51,6 +51,7 @@ if tp.TYPE_CHECKING:
         type[bpy.types.Image],
         type[bpy.types.Bone],
         type[bpy.types.Action],
+        type[bpy.types.WindowManager],
     ]
     BL_POINTER_PROPERTY_TYPES = tp.Union[
         type[bpy.types.PropertyGroup],
@@ -74,6 +75,7 @@ _POINTER_PROPERTIES = {
     bpy.types.Image: {},
     bpy.types.Bone: {},
     bpy.types.Action: {},
+    bpy.types.WindowManager: {},  # not saved in .blend files or undo
 }  # type: dict[BL_ID_TYPES, dict[str, BL_POINTER_PROPERTY_TYPES]]
 
 # Global draw handler callbacks and options that decorator appends to for SpaceView3D draw handlers.

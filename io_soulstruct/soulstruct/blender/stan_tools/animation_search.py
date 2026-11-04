@@ -18,6 +18,7 @@ from ..animation.utilities import (
     load_character_anibnd_bundle,
 )
 from ..base.operators import LoggingOperator
+from .list_picker import ListPickerMixin
 
 from .animation_labels import label_for_animation_entry, load_tae_labels_for_binder
 from .character_context import resolve_stan_character_context
@@ -61,7 +62,7 @@ def build_character_animation_search_items(
 
 
 @io_soulstruct_operator
-class StanSearchCharacterAnimation(LoggingOperator):
+class StanSearchCharacterAnimation(ListPickerMixin, LoggingOperator):
     """Import one HKX clip from the active character's ANIBND via search popup."""
 
     bl_idname = "stan_tools.search_character_animation"
@@ -71,8 +72,6 @@ class StanSearchCharacterAnimation(LoggingOperator):
         "Uses the last character imported via Stan's Tools if none is selected"
     )
     bl_options = {"REGISTER", "UNDO"}
-
-    bl_property = "animation_entry_id"
 
     _search_items: list[tuple[str, str, str]] = [("", "", "")]
 
@@ -99,10 +98,10 @@ class StanSearchCharacterAnimation(LoggingOperator):
             and not StanSearchCharacterAnimation._search_items[0][0]
         ):
             return self.error(StanSearchCharacterAnimation._search_items[0][1])
-        context.window_manager.invoke_search_popup(self)
-        return {"RUNNING_MODAL"}
+        return self.open_picker(context, StanSearchCharacterAnimation._search_items)
 
     def execute(self, context):
+        self.animation_entry_id = self.picked(context, self.animation_entry_id)
         if not self.animation_entry_id:
             return self.error("No animation selected.")
 

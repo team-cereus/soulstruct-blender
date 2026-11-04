@@ -32,6 +32,7 @@ from soulstruct.nightreign.maps import MSB
 from soulstruct.base.maps.msb.enums import MSBSupertype
 
 from ..base.operators import LoggingOperator
+from .list_picker import ListPickerMixin
 from ..base.register import io_soulstruct_operator
 from ..flver.models.types import BlenderFLVER
 from ..utilities.conversion import BLTransform, to_blender
@@ -427,13 +428,13 @@ def _tile_search_items(self, context):
 
 
 @io_soulstruct_operator
-class StanPoiEditorPick(LoggingOperator):
+class StanPoiEditorPick(ListPickerMixin, LoggingOperator):
     """Search the unpacked POI maps and load one for editing."""
 
     bl_idname = "stan_tools.poi_editor_pick"
     bl_label = "Pick POI"
     bl_description = "Search unpacked POI maps (m30_30, m46_05, ...) and load the chosen one"
-    bl_property = "tile"
+    picker_recent_key = "pois"
 
     _items: list[tuple[str, str, str]] = [("", "", "")]
     tile: bpy.props.EnumProperty(name="POI", items=_tile_search_items)
@@ -443,10 +444,10 @@ class StanPoiEditorPick(LoggingOperator):
         if not tiles:
             return self.error("No POI maps unpacked. Setup > Unpacked Game Files: tick POI Maps and Unpack.")
         StanPoiEditorPick._items = [(stem, stem, f"Load POI map {stem}") for stem in tiles]
-        context.window_manager.invoke_search_popup(self)
-        return {"RUNNING_MODAL"}
+        return self.open_picker(context, StanPoiEditorPick._items)
 
     def execute(self, context):
+        self.tile = self.picked(context, self.tile)
         context.scene.stan_tools_settings.poi_edit_tile = self.tile
         return load_poi_tile(self, context, self.tile)
 

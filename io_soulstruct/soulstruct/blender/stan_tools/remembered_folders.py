@@ -6,7 +6,7 @@ Tools data folder, and scenes whose folders for a game are still empty get them 
 """
 from __future__ import annotations
 
-__all__ = ["remember_folders", "apply_remembered_folders"]
+__all__ = ["remember_folders", "apply_remembered_folders", "get_recent_picks", "add_recent_pick"]
 
 import json
 import logging
@@ -20,6 +20,7 @@ from ..base.register import io_soulstruct_register, io_soulstruct_unregister
 from .nr_unpack import _stan_tools_dir
 
 _LOGGER = logging.getLogger("soulstruct.blender.stan_tools")
+_MAX_RECENT_PICKS = 8
 
 
 def _settings_path() -> Path:
@@ -31,6 +32,25 @@ def _load() -> dict:
         return json.loads(_settings_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+def _save(data: dict):
+    try:
+        _settings_path().parent.mkdir(parents=True, exist_ok=True)
+        _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError as ex:
+        _LOGGER.warning(f"Could not save Stan's Tools settings to {_settings_path()}: {ex}")
+
+
+def get_recent_picks(key: str) -> list[str]:
+    return _load().get("recent_picks", {}).get(key, [])
+
+
+def add_recent_pick(key: str, value: str):
+    data = _load()
+    recent = data.setdefault("recent_picks", {}).setdefault(key, [])
+    data["recent_picks"][key] = [value, *(v for v in recent if v != value)][:_MAX_RECENT_PICKS]
+    _save(data)
 
 
 def remember_folders(context: bpy.types.Context):
@@ -49,11 +69,7 @@ def remember_folders(context: bpy.types.Context):
         "prefer_import_from_project": settings.prefer_import_from_project,
         "nightreign_unpack_staging": settings.nightreign_unpack_staging_str,
     }
-    try:
-        _settings_path().parent.mkdir(parents=True, exist_ok=True)
-        _settings_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except OSError as ex:
-        _LOGGER.warning(f"Could not remember Stan's Tools folders in {_settings_path()}: {ex}")
+    _save(data)
 
 
 def apply_remembered_folders(scene: bpy.types.Scene) -> bool:

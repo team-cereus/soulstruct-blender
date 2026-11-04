@@ -209,7 +209,7 @@ class StanCharactersPanel(_StanToolsPanel):
         row = box.row(align=True)
         row.operator(StanApplyNpcParamDrawMask.bl_idname, icon="HIDE_OFF")
         row.operator(StanShowAllCharacterMeshes.bl_idname, icon="RESTRICT_VIEW_OFF")
-        box.label(text="NPC Param applies on selection; Apply re-runs if needed")
+        box.label(text="Picking a row switches the visible parts")
 
 
 @io_soulstruct_panel

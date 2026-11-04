@@ -14,6 +14,7 @@ from pathlib import Path
 import bpy
 
 from ..base.operators import LoggingOperator
+from .list_picker import ListPickerMixin
 from ..general.weapon_names import get_weapon_index
 
 from .debug_log import stan_debug, stan_info, stan_warning
@@ -101,7 +102,7 @@ def build_weapon_search_items(context: bpy.types.Context) -> list[tuple[str, str
 
 
 @io_soulstruct_operator
-class StanSearchWeaponToImport(LoggingOperator):
+class StanSearchWeaponToImport(ListPickerMixin, LoggingOperator):
     """Import weapon FLVER by EquipParamWeapon row id (Stan's Tools).
 
     Not a subclass of the registered `ImportEquipmentFLVER`: registering a subclass of a registered operator
@@ -116,7 +117,8 @@ class StanSearchWeaponToImport(LoggingOperator):
     )
     bl_options = {"REGISTER", "UNDO"}
 
-    bl_property = "weapon_row"
+    picker_recent_key = "weapons"
+    picker_confirm_text = "Equip"
 
     _search_items: list[tuple[str, str, str]] = [("", "", "")]
 
@@ -141,10 +143,10 @@ class StanSearchWeaponToImport(LoggingOperator):
         StanSearchWeaponToImport._search_items = build_weapon_search_items(context)
         if len(StanSearchWeaponToImport._search_items) == 1 and not StanSearchWeaponToImport._search_items[0][0]:
             return self.error(StanSearchWeaponToImport._search_items[0][1])
-        context.window_manager.invoke_search_popup(self)
-        return {"RUNNING_MODAL"}
+        return self.open_picker(context, StanSearchWeaponToImport._search_items)
 
     def execute(self, context):
+        self.weapon_row = self.picked(context, self.weapon_row)
         if not self.weapon_row:
             return self.error("No weapon selected.")
 
