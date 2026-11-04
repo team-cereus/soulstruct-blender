@@ -352,6 +352,12 @@ def import_character_hkx_animation_entry(
             f"Cannot import HKX animation {anim_name} from '{binder.path_name}'. Error: {ex}"
         )
     operator.debug(f"Created animation action in {time.perf_counter() - p:.3f} s.")
+
+    # FLVERs can hold rig bones that aren't in the animation skeleton (400 of Heolstor's 533). No clip moves them, so
+    # they would stay in the bind pose around the animated body. `hide` is display-only.
+    animated_bone_names = {bone.name for bone in skeleton_hkx.skeleton.bones}
+    for bone in armature_obj.data.bones:
+        bone.hide = bone.name not in animated_bone_names
     return {"FINISHED"}
 
 
