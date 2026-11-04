@@ -4,9 +4,13 @@
 //   BYTES <b>          bytes still to write (with --dry-run, nothing else happens)
 //   PROGRESS <done> <n>
 //   DONE <written> <skipped> <errors>
+//   PARAMS <written>   with --params: <out>/regulation-bin/<name>.param.xml files written from regulation.bin
+using System.Globalization;
 using System.Reflection;
+using System.Xml;
 using Andre.IO.VFS;
 using Andre.Core;
+using SoulsFormats;
 
 static int Usage()
 {
@@ -18,9 +22,53 @@ static int Usage()
 
 static string NormalizeVfs(string path) => path.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
 
+// Writes the params Stan's Tools reads as Witchy-style XML rows (the add-on only looks at <row> attributes). Every
+// field is written, including default values, which Witchy would omit.
+static int ExportParams(string gameDir, string outDir, string workDir)
+{
+    var assembly = Assembly.GetExecutingAssembly();
+    var destDir = Path.Combine(outDir, "regulation-bin");
+    Directory.CreateDirectory(destDir);
+    var written = 0;
+    foreach (var file in SFUtil.DecryptNightreignRegulation(Path.Combine(gameDir, "regulation.bin")).Files)
+    {
+        var name = Path.GetFileNameWithoutExtension(file.Name);
+        using var defStream = assembly.GetManifestResourceStream($"ParamDefs.{name}.xml");
+        if (defStream is null)
+            continue;  // not a param the add-on reads
+        var defPath = Path.Combine(workDir, $"{name}.paramdef.xml");
+        using (var defFile = File.Create(defPath))
+            defStream.CopyTo(defFile);
+        var param = PARAM.Read(file.Bytes);
+        param.ApplyParamdef(PARAMDEF.XmlDeserialize(defPath));
+
+        var settings = new XmlWriterSettings { Indent = true, IndentChars = "", CheckCharacters = false };
+        using var writer = XmlWriter.Create(Path.Combine(destDir, $"{name}.param.xml"), settings);
+        writer.WriteStartElement("param");
+        writer.WriteStartElement("rows");
+        foreach (var row in param.Rows)
+        {
+            writer.WriteStartElement("row");
+            writer.WriteAttributeString("id", row.ID.ToString(CultureInfo.InvariantCulture));
+            foreach (var cell in row.Cells)
+            {
+                if (cell.Def.DisplayType == PARAMDEF.DefType.dummy8 || cell.Value is byte[])
+                    continue;
+                var value = Convert.ToString(cell.Value, CultureInfo.InvariantCulture) ?? "";
+                writer.WriteAttributeString(cell.Def.InternalName, value);
+            }
+            writer.WriteEndElement();
+        }
+        writer.WriteEndElement();
+        writer.WriteEndElement();
+        written++;
+    }
+    return written;
+}
+
 string? gameDir = null, outDir = null;
 var includes = new List<string>();
-bool skipExisting = false, dryRun = false;
+bool skipExisting = false, dryRun = false, exportParams = false;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i].ToLowerInvariant())
@@ -30,6 +78,7 @@ for (var i = 0; i < args.Length; i++)
         case "--include" when i + 1 < args.Length: includes.Add(NormalizeVfs(args[++i])); break;
         case "--skip-existing": skipExisting = true; break;
         case "--dry-run": dryRun = true; break;  // only print TOTAL and BYTES (still to write), e.g. for a disk check
+        case "--params": exportParams = true; break;  // also write regulation-bin/*.param.xml
         default: return Usage();
     }
 }
@@ -95,6 +144,18 @@ using (var vfs = ArchiveBinderVirtualFileSystem.FromGameFolder(gameDir, Game.NR)
         }
         if (++done % 25 == 0 || done == matched.Count)
             Console.WriteLine($"PROGRESS {done} {matched.Count}");
+    }
+}
+if (exportParams)
+{
+    try
+    {
+        Console.WriteLine($"PARAMS {ExportParams(gameDir, outDir, workDir)}");
+    }
+    catch (Exception ex)
+    {
+        errors++;
+        Console.Error.WriteLine($"ERROR regulation.bin: {ex.Message}");
     }
 }
 Console.WriteLine($"DONE {written} {skipped} {errors}");

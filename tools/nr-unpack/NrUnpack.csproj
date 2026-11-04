@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>NrUnpack</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <SmithboxDir Condition="'$(SmithboxDir)' == ''">S:\Smithbox</SmithboxDir>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -22,6 +22,16 @@
     <ProjectReference Include="$(SmithboxDir)\src\Andre\Andre.IO\Andre.IO.csproj" />
     <EmbeddedResource Include="$(SmithboxDir)\src\Andre\Andre.Formats\Resources\EldenRingNightreignDictionary.txt"
                       LogicalName="EldenRingNightreignDictionary.txt" />
+  </ItemGroup>
+
+  <!-- Layouts of the params Stan's Tools reads. An embedded def is what selects a param for export. -->
+  <ItemGroup>
+    <ParamName Include="NpcParam;EquipParamWeapon;EquipParamProtector;WepAbsorpPosParam" />
+    <ParamName Include="SmallBaseAndSpotAttachPoint;SmallBaseAndSpotDefine;SmallBaseMapVariationParam" />
+    <ParamName Include="LotResultMapPatternFlag;LotResultPlayAreaParam;LotResultSmallBaseAndSpot" />
+    <EmbeddedResource Include="@(ParamName->'$(SmithboxDir)/src/Smithbox.Data/Assets/PARAM/NR/Defs/%(Identity).xml')">
+      <LogicalName>ParamDefs.%(Filename).xml</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

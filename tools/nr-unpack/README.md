@@ -8,11 +8,15 @@ Users never run this by hand: **Stan's Tools → Setup → Unpack Nightreign Fil
 this repo's GitHub release and runs it (see `stan_tools/nr_unpack.py`).
 
 ```
-NrUnpack --game "<...>\ELDEN RING NIGHTREIGN\Game" --out <folder> --include chr/ --include parts/ [--skip-existing] [--dry-run]
+NrUnpack --game "<...>\ELDEN RING NIGHTREIGN\Game" --out <folder> --include chr/ --include parts/ [--skip-existing] [--dry-run] [--params]
 ```
 
 Output lines for callers: `TOTAL <files>`, `BYTES <bytes still to write>`, `PROGRESS <done> <total>`,
 `DONE <written> <skipped> <errors>`. `--dry-run` stops after `BYTES`. Exit code 3 means some files failed.
+
+`--params` also decrypts the game's `regulation.bin` and writes the params Stan's Tools reads to
+`<out>/regulation-bin/<name>.param.xml`, as Witchy-style rows (it checks `<row>` attributes only). To add a param,
+add its name to `ParamName` in `NrUnpack.csproj`.
 
 ## Building and publishing
 
