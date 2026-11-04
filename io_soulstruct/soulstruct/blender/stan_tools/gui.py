@@ -111,7 +111,7 @@ class StanSetupPanel(_StanToolsPanel):
         if xml_path:
             layout.label(text=f"Using: {xml_path.name}", icon="CHECKMARK")
         elif stan.npc_param_xml_path or settings.project_root_path:
-            layout.label(text="NpcParam.param.xml not found", icon="ERROR")
+            layout.label(text="Not found: click Unpack Nightreign Files", icon="ERROR")
 
         layout.label(text="Regulation Bin (POI / params):")
         layout.prop(stan, "regulation_bin_dir", text="")
@@ -119,7 +119,7 @@ class StanSetupPanel(_StanToolsPanel):
         if reg_dir:
             layout.label(text=f"Using: {reg_dir.name}", icon="CHECKMARK")
         elif stan.regulation_bin_dir or settings.project_root_path:
-            layout.label(text="regulation-bin not found", icon="ERROR")
+            layout.label(text="Not found: click Unpack Nightreign Files", icon="ERROR")
 
         layout.label(text="EquipParamWeapon (weapon attacks):")
         layout.prop(stan, "equip_weapon_param_xml_path", text="")
@@ -359,7 +359,7 @@ class StanMapPoiPanel(_StanToolsPanel):
             text_with_tooltip(
                 layout,
                 "regulation-bin not found",
-                "Set Game Root to the Nightreign Game folder that contains regulation-bin (param XML dumps).",
+                "Setup > Unpack Nightreign Files creates it from your game's regulation.bin.",
                 icon="ERROR",
             )
 

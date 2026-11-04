@@ -30,12 +30,12 @@ from ..general.matdefs import clear_cached_matdefs
 from ..general.properties import SoulstructSettings
 from .steam_paths import detect_game_root
 
-UNPACKER_VERSION = "1.0.0"
+UNPACKER_VERSION = "1.1.0"
 UNPACKER_URL = (
     "https://github.com/team-cereus/soulstruct-blender/releases/download/"
     f"nr-unpack-v{UNPACKER_VERSION}/NrUnpack.exe"
 )
-UNPACKER_SHA256 = "e77dfa800425b87802e24e4f7f9e2f3530765f21976ea7ad7c7224534bd04ae8"
+UNPACKER_SHA256 = "eaa3606f9dc392432203e76bb8514a9da9c87e2208311a24bd8b24cbf7989c58"
 _FREE_SPACE_MARGIN = 512 * 1024**2
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -116,7 +116,7 @@ def _run_job(job: _UnpackJob, game_root: Path, out_dir: Path, includes: list[str
 
         job.status = f"Unpacking {needed / 1024**3:.1f} GB..."
         job.process = subprocess.Popen(
-            args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=_NO_WINDOW
+            args + ["--params"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, creationflags=_NO_WINDOW
         )
         errors = []
         for line in job.process.stdout:

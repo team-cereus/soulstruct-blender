@@ -112,8 +112,7 @@ class StanRefreshNpcParamList(LoggingOperator):
         settings = SoulstructSettings.from_context(context)
         if not _resolve_npc_param_xml_path(settings, context.scene.stan_tools_settings):
             return self.warning(
-                "NpcParam.param.xml not found. Set NpcParam XML in Setup or add "
-                "regulation-bin/NpcParam.param.xml under Project Root."
+                "NpcParam.param.xml not found. Click Unpack Nightreign Files in Setup to create it from your game."
             )
         if stan.refresh_npc_param_list(context):
             self.info(f"Loaded NPC Param rows for {stan.character_model}.")

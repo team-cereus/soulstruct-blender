@@ -37,8 +37,9 @@ def _log(message: str):
 
 def _git(repo: Path, git: str, *args: str, timeout: float = 60) -> str:
     # `core.longpaths`: soulstruct-havok's generated type modules overflow MAX_PATH under %LOCALAPPDATA%.
+    # `safe.directory`: an installer run as Administrator leaves the clone owned by Administrators, not this user.
     result = subprocess.run(
-        [git, "-C", str(repo), "-c", "core.longpaths=true", *args],
+        [git, "-C", str(repo), "-c", "core.longpaths=true", "-c", "safe.directory=*", *args],
         capture_output=True, text=True, timeout=timeout, creationflags=_NO_WINDOW,
     )
     if result.returncode != 0:

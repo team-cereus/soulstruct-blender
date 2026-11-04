@@ -230,6 +230,12 @@ if ($versions.Count -eq 0) {
 
 $script:Git = Install-GitIfMissing
 
+# A clone made by an installer run as Administrator is owned by Administrators; git refuses that for a normal user.
+# Scoped to this PowerShell session's git calls, including submodules.
+$env:GIT_CONFIG_COUNT = "1"
+$env:GIT_CONFIG_KEY_0 = "safe.directory"
+$env:GIT_CONFIG_VALUE_0 = "*"
+
 if (Test-Path (Join-Path $InstallDir ".git")) {
     Write-Step "Updating existing install at $InstallDir"
     Invoke-Git @("-C", $InstallDir, "fetch", "--quiet", "origin", $Branch)
