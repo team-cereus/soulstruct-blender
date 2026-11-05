@@ -9,6 +9,8 @@ from __future__ import annotations
 __all__ = [
     "StanUnpackNightreign",
     "default_unpack_dir",
+    "ensure_nightreign_params",
+    "nr_unpack_dir",
     "unpack_status",
 ]
 
@@ -50,6 +52,57 @@ def _stan_tools_dir() -> Path:
 
 def default_unpack_dir() -> Path:
     return _stan_tools_dir() / "nr-unpack"
+
+
+def nr_unpack_dir(stan) -> Path:
+    """The Unpack Folder setting, or the default one."""
+    return Path(bpy.path.abspath(stan.nr_unpack_dir)) if stan.nr_unpack_dir else default_unpack_dir()
+
+
+# Game roots whose automatic param export already ran (or failed) this Blender session, so a failure is not retried on
+# every import.
+_PARAMS_TRIED: set[Path] = set()
+
+
+def export_params(game_root: Path, out_dir: Path, job: _UnpackJob | None = None) -> Path:
+    """Write `out_dir/regulation-bin/*.param.xml` from the game's regulation.bin, without extracting any archive files.
+    Blocks for a few seconds (plus a one-time 40 MB unpacker download). Raises RuntimeError on failure."""
+    exe = _ensure_unpacker(job or _UnpackJob())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # NrUnpack needs an --include; this prefix matches no archive file, so only the params are written.
+    args = [str(exe), "--game", str(game_root), "--out", str(out_dir), "--include", "__params_only__/", "--params"]
+    result = subprocess.run(args, capture_output=True, text=True, creationflags=_NO_WINDOW, timeout=600)
+    reg_dir = out_dir / "regulation-bin"
+    if result.returncode != 0 or not (reg_dir / "NpcParam.param.xml").is_file():
+        lines = [line for line in (result.stderr + result.stdout).splitlines() if line.strip()]
+        raise RuntimeError(lines[-1] if lines else f"Param export failed (exit {result.returncode}).")
+    return reg_dir
+
+
+def ensure_nightreign_params(context) -> Path | None:
+    """Nightreign only: export regulation-bin/*.param.xml into the Unpack Folder if no NpcParam.param.xml can be found
+    (e.g. files unpacked with NrUnpack 1.0.0, which had no --params). Returns the regulation-bin folder, or None."""
+    settings = SoulstructSettings.from_context(context)
+    if not settings.is_game(NIGHTREIGN):
+        return None
+    stan = context.scene.stan_tools_settings
+    game_root = settings.game_root_path
+    if not game_root or not (game_root / "regulation.bin").is_file():
+        game_root = detect_game_root(NIGHTREIGN.variable_name)
+    if not game_root or not (game_root / "regulation.bin").is_file() or game_root in _PARAMS_TRIED:
+        return None
+    _PARAMS_TRIED.add(game_root)
+    out_dir = nr_unpack_dir(stan)
+    if out_dir.resolve() == game_root.resolve():
+        return None
+    print(f"[Stan's Tools] NpcParam.param.xml not found; exporting params from {game_root} to {out_dir}...")
+    try:
+        reg_dir = export_params(game_root, out_dir)
+    except Exception as ex:  # noqa: BLE001  (download, subprocess or disk errors all just mean "no params")
+        print(f"[Stan's Tools] Param export failed: {ex}")
+        return None
+    print(f"[Stan's Tools] Exported params to {reg_dir}")
+    return reg_dir
 
 
 class _UnpackJob:
@@ -182,7 +235,7 @@ class StanUnpackNightreign(LoggingOperator):
         # Nightreign-only characters/assets (e.g. c7720) have their MATBINs only in the game's own MATBINBNDs; the
         # bundled Elden Ring ones lack them and those materials import untextured. 4 MB, so always included.
         includes = list(dict.fromkeys(["material/"] + includes))
-        out_dir = Path(bpy.path.abspath(stan.nr_unpack_dir)) if stan.nr_unpack_dir else default_unpack_dir()
+        out_dir = nr_unpack_dir(stan)
         if out_dir.resolve() == game_root.resolve():
             return self.error("Unpack Folder must not be the game folder.")
 

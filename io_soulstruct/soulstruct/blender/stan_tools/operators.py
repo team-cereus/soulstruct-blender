@@ -110,14 +110,16 @@ class StanRefreshNpcParamList(LoggingOperator):
     def execute(self, context):
         stan = context.scene.stan_tools_settings
         settings = SoulstructSettings.from_context(context)
-        if not _resolve_npc_param_xml_path(settings, context.scene.stan_tools_settings):
-            return self.warning(
-                "NpcParam.param.xml not found. Click Unpack Nightreign Files in Setup to create it from your game."
-            )
         if stan.refresh_npc_param_list(context):
             self.info(f"Loaded NPC Param rows for {stan.character_model}.")
             return {"FINISHED"}
-        return self.warning("Could not find NPC Param rows. Import a character (c####) first.")
+        if not stan.character_model:
+            return self.warning("Import a character (c####) first.")
+        if not _resolve_npc_param_xml_path(settings, stan):
+            return self.warning(
+                "NpcParam.param.xml not found. Click Unpack Nightreign Files in Setup to create it from your game."
+            )
+        return self.warning(f"NpcParam has no rows for {stan.character_model}.")
 
 
 @io_soulstruct_operator

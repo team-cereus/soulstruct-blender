@@ -30,13 +30,36 @@ def _resolve_explicit_regulation_bin_dir(stan_settings) -> Path | None:
     return None
 
 
-def _iter_regulation_bin_candidates(settings: SoulstructSettings) -> list[Path]:
+def _param_search_roots(settings: SoulstructSettings, stan_settings=None) -> list[Path]:
+    """Project Root, Game Root, then the Unpack Folder, where Unpack Nightreign Files and the automatic param export
+    write regulation-bin/ even when Project Root points somewhere else."""
+    from .nr_unpack import nr_unpack_dir
+
+    roots = [settings.project_root_path, settings.game_root_path]
+    if stan_settings is not None:
+        roots.append(nr_unpack_dir(stan_settings))
+    return [Path(bpy.path.abspath(str(root))) for root in roots if root]
+
+
+def find_param_xml(settings: SoulstructSettings, stan_settings, param_stem: str) -> Path | None:
+    """First `<param_stem>.param.xml` in regulation-bin/, param/ or param/param/ under the search roots."""
+    for root in _param_search_roots(settings, stan_settings):
+        for sub in _REGULATION_SUBDIRS:
+            candidate = root / sub / f"{param_stem}.param.xml"
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _iter_regulation_bin_candidates(settings: SoulstructSettings, stan_settings=None) -> list[Path]:
     candidates: list[Path] = []
     seen: set[Path] = set()
-    for root in (settings.game_root_path, settings.project_root_path):
-        if not root:
-            continue
-        base = Path(bpy.path.abspath(str(root)))
+    roots = _param_search_roots(settings, stan_settings)
+    # Game Root first, as before, so a Witchy dump next to the game still wins for POI params.
+    if settings.game_root_path:
+        game = Path(bpy.path.abspath(str(settings.game_root_path)))
+        roots = [game] + [r for r in roots if r != game]
+    for base in roots:
         for sub in _REGULATION_SUBDIRS:
             candidate = base / sub
             if candidate.is_dir() and candidate not in seen:
@@ -54,7 +77,7 @@ def find_regulation_bin_dir(
     if explicit is not None:
         return explicit
 
-    candidates = _iter_regulation_bin_candidates(settings)
+    candidates = _iter_regulation_bin_candidates(settings, stan_settings)
     if not candidates:
         return None
 

@@ -36,14 +36,9 @@ def resolve_equip_weapon_xml_path(
         if path.is_file():
             return path
 
-    for root in (settings.project_root_path, settings.game_root_path):
-        if root is None:
-            continue
-        for sub in ("regulation-bin", "param", "param/param"):
-            candidate = root / sub / "EquipParamWeapon.param.xml"
-            if candidate.is_file():
-                return candidate
-    return None
+    from .regulation_bin import find_param_xml
+
+    return find_param_xml(settings, stan_settings, "EquipParamWeapon")
 
 
 @lru_cache(maxsize=4)

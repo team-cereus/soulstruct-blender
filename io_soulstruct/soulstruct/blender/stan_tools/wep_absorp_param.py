@@ -62,14 +62,9 @@ def resolve_wep_absorp_xml_path(
             if sibling.is_file():
                 return sibling
 
-    for root in (settings.project_root_path, settings.game_root_path):
-        if root is None:
-            continue
-        for sub in ("regulation-bin", "param", "param/param"):
-            candidate = root / sub / "WepAbsorpPosParam.param.xml"
-            if candidate.is_file():
-                return candidate
-    return None
+    from .regulation_bin import find_param_xml
+
+    return find_param_xml(settings, stan_settings, "WepAbsorpPosParam")
 
 
 @lru_cache(maxsize=4)

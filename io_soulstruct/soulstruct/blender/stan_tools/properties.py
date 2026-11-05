@@ -11,7 +11,7 @@ from ..bpy_base.property_group import SoulstructPropertyGroup
 from ..animation.utilities import get_active_flver_or_part_armature
 
 from .mesh_mask_visibility import apply_draw_mask_to_character, show_all_character_meshes
-from .npc_param import find_character_armature, get_npc_param_variants_for_model
+from .npc_param import _resolve_npc_param_xml_path, find_character_armature, get_npc_param_variants_for_model
 from .player_character import is_player_character_loaded
 from .scene_lighting import is_scene_lighting_active
 from .weapon_anim import list_c0000_sub_anibnd_stems
@@ -28,9 +28,14 @@ def _weapon_attack_slot_items(self, context) -> list[tuple[str, str, str]]:
     ]
 
 
+# Identifier of the placeholder NPC Param item. Blender treats an item with an empty identifier as a heading, not a
+# value, so assigning "" while only the placeholder existed raised `enum "" not found in ()` on import.
+NPC_PARAM_NONE = "NONE"
+
+
 def _npc_param_enum_items(self, context) -> list[tuple[str, str, str]]:
     items = StanToolsSettings._npc_param_items
-    if context is not None and self.character_model and not items[0][0]:
+    if context is not None and self.character_model and items[0][0] == NPC_PARAM_NONE:
         # The list lives in memory only, so it is empty again after reopening a .blend.
         variants = get_npc_param_variants_for_model(
             context.scene.soulstruct_settings, self, self.character_model
@@ -54,7 +59,7 @@ def _on_npc_param_row_changed(self, context: bpy.types.Context) -> None:
     """Apply draw mask when the user picks a row (skipped during import list refresh)."""
     if StanToolsSettings._suppress_npc_param_update:
         return
-    if not self.npc_param_row_id or not self.character_model:
+    if not self.has_npc_param_row() or not self.character_model:
         return
     self.apply_active_npc_param(context)
 
@@ -72,7 +77,7 @@ def _update_poi_filters(self, context: bpy.types.Context) -> None:
 class StanToolsSettings(SoulstructPropertyGroup):
     """Per-scene settings for Stan's Tools workflow."""
 
-    _npc_param_items: list[tuple[str, str, str]] = [("", "<none>", "")]
+    _npc_param_items: list[tuple[str, str, str]] = [(NPC_PARAM_NONE, "<none>", "")]
     _c0000_sub_anibnd_items: list[tuple[str, str, str]] = [("", "<none>", "")]
     _map_seed_items: list[tuple[str, str, str]] = [("", "<none>", "")]
     _suppress_npc_param_update: bool = False
@@ -350,13 +355,24 @@ class StanToolsSettings(SoulstructPropertyGroup):
         """True when DSAS player character (c0000) is loaded and present in scene."""
         return is_player_character_loaded(context)
 
+    def has_npc_param_row(self) -> bool:
+        """True when a real NpcParam row (not the placeholder) is selected."""
+        row_id = self.npc_param_row_id
+        return bool(row_id) and row_id != NPC_PARAM_NONE
+
     def _set_npc_param_row_id(self, row_id: str) -> None:
-        """Assign enum by identifier; avoids TypeError when items just changed."""
+        """Assign enum by identifier without running the apply callback."""
         StanToolsSettings._suppress_npc_param_update = True
         try:
             self.npc_param_row_id = row_id
+        except TypeError:
+            pass  # a stale item list must never break an import; the dropdown re-reads its items when drawn
         finally:
             StanToolsSettings._suppress_npc_param_update = False
+
+    def _set_npc_param_placeholder(self, label: str, description: str = "") -> None:
+        StanToolsSettings._npc_param_items = [(NPC_PARAM_NONE, label, description)]
+        self._set_npc_param_row_id(NPC_PARAM_NONE)
 
     def _set_c0000_sub_anibnd(self, stem: str) -> None:
         self["c0000_sub_anibnd"] = stem
@@ -432,21 +448,28 @@ class StanToolsSettings(SoulstructPropertyGroup):
                 self.character_model = name[:5].lower() if len(name) >= 5 else name.lower()
 
         if not self.character_model:
-            StanToolsSettings._npc_param_items = [("", "<import a character>", "")]
-            self._set_npc_param_row_id("")
+            self._set_npc_param_placeholder("<import a character>")
             return False
 
         settings = context.scene.soulstruct_settings
+        if _resolve_npc_param_xml_path(settings, self) is None:
+            # Unpacked before NrUnpack 1.1.0 (or never unpacked): write the param XMLs from the game's regulation.bin.
+            from .nr_unpack import ensure_nightreign_params
+
+            ensure_nightreign_params(context)
+        if _resolve_npc_param_xml_path(settings, self) is None:
+            self._set_npc_param_placeholder(
+                "<NpcParam.param.xml not found>",
+                "Nightreign: click Unpack Nightreign Files in Setup. Other games: set NpcParam XML in Setup",
+            )
+            return False
+
         variants = get_npc_param_variants_for_model(settings, self, self.character_model)
         if not variants:
-            StanToolsSettings._npc_param_items = [
-                (
-                    "",
-                    "<no NpcParam — optional for ER/NR mesh masks>",
-                    "DS1/DSR/DeS do not use NpcParam draw masks; ER/NR: point to NpcParam.param.xml",
-                )
-            ]
-            self._set_npc_param_row_id("")
+            self._set_npc_param_placeholder(
+                f"<no NpcParam rows for {self.character_model}>",
+                f"NpcParam has no rows for character {self.character_model}",
+            )
             return False
 
         StanToolsSettings._npc_param_items = [
@@ -459,7 +482,7 @@ class StanToolsSettings(SoulstructPropertyGroup):
 
     def apply_active_npc_param(self, context: bpy.types.Context) -> str | None:
         """Apply draw mask for current enum selection. Returns error message or None."""
-        if not self.character_model or not self.npc_param_row_id:
+        if not self.character_model or not self.has_npc_param_row():
             return "Select an NPC Param row."
         armature = find_character_armature(context, self.character_model)
         if armature is None:
