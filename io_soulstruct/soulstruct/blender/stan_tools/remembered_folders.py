@@ -21,6 +21,7 @@ from .nr_unpack import _stan_tools_dir
 
 _LOGGER = logging.getLogger("soulstruct.blender.stan_tools")
 _MAX_RECENT_PICKS = 8
+_applying = False  # filling remembered folders into a scene must not save that (maybe half-set) scene back
 
 
 def _settings_path() -> Path:
@@ -55,6 +56,8 @@ def add_recent_pick(key: str, value: str):
 
 def remember_folders(context: bpy.types.Context):
     """Save the active game's folders (called after Unpack Nightreign Files and Auto-Detect)."""
+    if _applying:
+        return
     settings = context.scene.soulstruct_settings
     game = settings.game
     if not game:
@@ -66,6 +69,7 @@ def remember_folders(context: bpy.types.Context):
         "game_root": game_settings.game_root_str,
         "project_root": game_settings.project_root_str,
         "mod_root": game_settings.mod_root_str,
+        "mod_import_root": game_settings.mod_import_root_str,
         "prefer_import_from_project": settings.prefer_import_from_project,
         "nightreign_unpack_staging": settings.nightreign_unpack_staging_str,
     }
@@ -74,6 +78,15 @@ def remember_folders(context: bpy.types.Context):
 
 def apply_remembered_folders(scene: bpy.types.Scene) -> bool:
     """Fill remembered folders into games whose folders are all empty in `scene`. Never overwrites a set folder."""
+    global _applying
+    _applying = True
+    try:
+        return _apply_remembered_folders(scene)
+    finally:
+        _applying = False
+
+
+def _apply_remembered_folders(scene: bpy.types.Scene) -> bool:
     data = _load()
     settings = scene.soulstruct_settings
     untouched_scene = (
@@ -86,6 +99,18 @@ def apply_remembered_folders(scene: bpy.types.Scene) -> bool:
             game_settings = getattr(settings, get_game(game_name).submodule_name)
         except (KeyError, ValueError, AttributeError):
             continue
+        if not game_settings.mod_import_root_str:
+            # Added later than the other folders: saved setups without it get an installed Eclipse found once.
+            mod_import = folders.get("mod_import_root")
+            if mod_import is None and game_name == "NIGHTREIGN":
+                from .steam_paths import detect_eclipse_mod_dir
+                detected = detect_eclipse_mod_dir()
+                mod_import = str(detected) if detected else ""
+                folders["mod_import_root"] = mod_import
+                _save(data)  # detect once; clearing the field afterwards sticks
+            if mod_import:
+                game_settings.mod_import_root_str = mod_import
+                applied = True
         if game_settings.game_root_str or game_settings.project_root_str or game_settings.mod_root_str:
             continue  # this scene has its own folders for that game
         game_settings.game_root_str = folders.get("game_root", "")

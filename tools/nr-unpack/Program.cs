@@ -5,6 +5,8 @@
 //   PROGRESS <done> <n>
 //   DONE <written> <skipped> <errors>
 //   PARAMS <written>   with --params: <out>/regulation-bin/<name>.param.xml files written from regulation.bin
+// `--regulation <file> --out <folder>` writes only those params, from any regulation.bin (e.g. a mod's), and needs no
+// game folder.
 using System.Globalization;
 using System.Reflection;
 using System.Xml;
@@ -16,6 +18,7 @@ static int Usage()
 {
     Console.Error.WriteLine(
         "Usage: NrUnpack --game <Nightreign Game folder> --out <folder> --include <prefix> [--include ...] [--skip-existing]\n" +
+        "       NrUnpack --regulation <regulation.bin> --out <folder>   (params only)\n" +
         "Example: NrUnpack --game \"C:\\...\\ELDEN RING NIGHTREIGN\\Game\" --out D:\\nr-unpack --include chr/ --include parts/");
     return 1;
 }
@@ -24,13 +27,13 @@ static string NormalizeVfs(string path) => path.Replace('\\', '/').TrimStart('/'
 
 // Writes the params Stan's Tools reads as Witchy-style XML rows (the add-on only looks at <row> attributes). Every
 // field is written, including default values, which Witchy would omit.
-static int ExportParams(string gameDir, string outDir, string workDir)
+static int ExportParams(string regulationPath, string outDir, string workDir)
 {
     var assembly = Assembly.GetExecutingAssembly();
     var destDir = Path.Combine(outDir, "regulation-bin");
     Directory.CreateDirectory(destDir);
     var written = 0;
-    foreach (var file in SFUtil.DecryptNightreignRegulation(Path.Combine(gameDir, "regulation.bin")).Files)
+    foreach (var file in SFUtil.DecryptNightreignRegulation(regulationPath).Files)
     {
         var name = Path.GetFileNameWithoutExtension(file.Name);
         using var defStream = assembly.GetManifestResourceStream($"ParamDefs.{name}.xml");
@@ -66,7 +69,7 @@ static int ExportParams(string gameDir, string outDir, string workDir)
     return written;
 }
 
-string? gameDir = null, outDir = null;
+string? gameDir = null, outDir = null, regulationPath = null;
 var includes = new List<string>();
 bool skipExisting = false, dryRun = false, exportParams = false;
 for (var i = 0; i < args.Length; i++)
@@ -79,8 +82,32 @@ for (var i = 0; i < args.Length; i++)
         case "--skip-existing": skipExisting = true; break;
         case "--dry-run": dryRun = true; break;  // only print TOTAL and BYTES (still to write), e.g. for a disk check
         case "--params": exportParams = true; break;  // also write regulation-bin/*.param.xml
+        case "--regulation" when i + 1 < args.Length: regulationPath = args[++i]; break;
         default: return Usage();
     }
+}
+if (regulationPath is not null)
+{
+    if (outDir is null || gameDir is not null || includes.Count > 0)
+        return Usage();
+    if (!File.Exists(regulationPath))
+    {
+        Console.Error.WriteLine($"regulation.bin not found: {regulationPath}");
+        return 2;
+    }
+    var paramsWorkDir = Path.Combine(Path.GetTempPath(), "NrUnpack");
+    Directory.CreateDirectory(paramsWorkDir);
+    try
+    {
+        Console.WriteLine($"PARAMS {ExportParams(Path.GetFullPath(regulationPath), Path.GetFullPath(outDir), paramsWorkDir)}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"ERROR regulation.bin: {ex.Message}");
+        return 3;
+    }
+    Console.WriteLine("DONE 0 0 0");
+    return 0;
 }
 if (gameDir is null || outDir is null || includes.Count == 0)
     return Usage();
@@ -150,7 +177,7 @@ if (exportParams)
 {
     try
     {
-        Console.WriteLine($"PARAMS {ExportParams(gameDir, outDir, workDir)}");
+        Console.WriteLine($"PARAMS {ExportParams(Path.Combine(gameDir, "regulation.bin"), outDir, workDir)}");
     }
     catch (Exception ex)
     {

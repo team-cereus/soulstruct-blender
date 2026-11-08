@@ -39,7 +39,7 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
     settings = context.scene.soulstruct_settings
     chr_dirs = _iter_chr_directories(settings)
 
-    if not settings.game_root_path and not settings.project_root_path:
+    if not settings.game_root_path and not settings.project_root_path and not settings.mod_import_root_path:
         return [("", "<set Game Root in Stan's Tools / Settings>", "")]
 
     if not chr_dirs:
@@ -56,6 +56,12 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
     names = get_character_name_map(settings)
     items: list[tuple[str, str, str]] = []
     seen_stems: set[str] = set()
+    mod_chr_dir = settings.mod_import_root_path / "chr" if settings.mod_import_root_path else None
+    vanilla_stems = {
+        m.group(1).lower()
+        for d in chr_dirs if d != mod_chr_dir
+        for p in d.iterdir() if (m := _CHR_BND_RE.match(p.name))
+    } if mod_chr_dir else set()
 
     for chr_dir in chr_dirs:
         for path in sorted(chr_dir.iterdir()):
@@ -75,6 +81,9 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
                 label = f"{stem} - {display}"
             else:
                 label = stem
+            if chr_dir == mod_chr_dir:
+                # Mod files: a new character (e.g. a port) or the mod's edited copy of a vanilla one.
+                label += " [Mod edit]" if stem in vanilla_stems else " [Mod]"
             items.append((stem, label, label))
 
     if not items:

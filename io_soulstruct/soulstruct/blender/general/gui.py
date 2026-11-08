@@ -39,6 +39,8 @@ class _BaseGlobalSettingsPanel(SoulstructPanel):
             smart_prop(layout, settings.game_settings, "project_root_str", text="")
             layout.label(text="Mod Folder:")
             smart_prop(layout, settings.game_settings, "mod_root_str", text="")
+            layout.label(text="Mod Files (read-only import):")
+            smart_prop(layout, settings.game_settings, "mod_import_root_str", text="")
             if settings.is_game(GameType.Nightreign):
                 layout.label(text="Unpack Staging:")
                 smart_prop(layout, settings, "nightreign_unpack_staging_str", text="")

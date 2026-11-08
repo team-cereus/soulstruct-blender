@@ -44,6 +44,9 @@ def get_mtdbnd(operator: LoggingOperator, context: bpy.types.Context) -> MTDBND:
         labelled_roots = (("project", settings.project_root), ("game", settings.game_root))
     else:
         labelled_roots = (("game", settings.game_root), ("project", settings.project_root))
+    if settings.mod_import_root_path:
+        # Merged last so the mod's own (e.g. ported) material definitions replace same-named vanilla ones.
+        labelled_roots += (("mod files", settings.mod_import_root),)
 
     mtdbnd = None  # type: MTDBND | None
     for label, root in labelled_roots:
@@ -97,6 +100,9 @@ def get_matbinbnd(operator: LoggingOperator, context: bpy.types.Context) -> MATB
         labelled_roots = (("project", settings.project_root), ("game", settings.game_root))
     else:
         labelled_roots = (("game", settings.game_root), ("project", settings.project_root))
+    if settings.mod_import_root_path:
+        # Merged last so the mod's own (e.g. ported) material definitions replace same-named vanilla ones.
+        labelled_roots += (("mod files", settings.mod_import_root),)
 
     matbinbnd = None  # type: MATBINBND | None
     for label, root in labelled_roots:

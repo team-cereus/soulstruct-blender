@@ -18,6 +18,9 @@ Output lines for callers: `TOTAL <files>`, `BYTES <bytes still to write>`, `PROG
 `<out>/regulation-bin/<name>.param.xml`, as Witchy-style rows (it checks `<row>` attributes only). To add a param,
 add its name to `ParamName` in `NrUnpack.csproj`.
 
+`NrUnpack --regulation <regulation.bin> --out <folder>` writes only those params, from any `regulation.bin` (Stan's
+Tools uses it for a mod's own params, e.g. Nightreign Eclipse's). It needs no game folder.
+
 ## Building and publishing
 
 Needs the .NET 9 SDK and a Smithbox clone (Andre.IO, MIT; pinned at `854818a37`).

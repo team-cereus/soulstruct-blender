@@ -46,7 +46,7 @@ def build_weapon_search_items(context: bpy.types.Context) -> list[tuple[str, str
     settings = context.scene.soulstruct_settings
     parts_dirs = _iter_parts_directories(settings)
 
-    if not settings.game_root_path and not settings.project_root_path:
+    if not settings.game_root_path and not settings.project_root_path and not settings.mod_import_root_path:
         return [("", "<set Game Root in Stan's Tools / Setup>", "")]
 
     if not parts_dirs:

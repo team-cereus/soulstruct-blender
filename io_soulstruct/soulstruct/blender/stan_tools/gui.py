@@ -101,6 +101,15 @@ class StanSetupPanel(_StanToolsPanel):
         layout.label(text="Mod Folder (DSAS / ModEngine):")
         layout.prop(settings.game_settings, settings.get_mod_root_prop_name(), text="")
 
+        layout.label(text="Mod Files to load (e.g. Eclipse's 'mod' folder):")
+        layout.prop(settings.game_settings, "mod_import_root_str", text="")
+        mod_files = settings.mod_import_root_path
+        if mod_files:
+            count = sum(1 for _ in (mod_files / "chr").glob("c*.chrbnd*")) if (mod_files / "chr").is_dir() else 0
+            layout.label(text=f"Loading mod files first: {count} character(s)", icon="CHECKMARK")
+        elif settings.game_settings.mod_import_root_str:
+            layout.label(text="Folder not found", icon="ERROR")
+
         layout.prop(settings, "prefer_import_from_project")
         layout.prop(export_settings, "auto_repack_to_mod")
 

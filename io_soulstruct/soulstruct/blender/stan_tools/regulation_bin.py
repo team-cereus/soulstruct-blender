@@ -31,11 +31,14 @@ def _resolve_explicit_regulation_bin_dir(stan_settings) -> Path | None:
 
 
 def _param_search_roots(settings: SoulstructSettings, stan_settings=None) -> list[Path]:
-    """Project Root, Game Root, then the Unpack Folder, where Unpack Nightreign Files and the automatic param export
-    write regulation-bin/ even when Project Root points somewhere else."""
-    from .nr_unpack import nr_unpack_dir
+    """Mod files params (exported from the mod's regulation.bin), Project Root, Game Root, then the Unpack Folder, where
+    Unpack Nightreign Files and the automatic param export write regulation-bin/ even when Project Root points
+    somewhere else."""
+    from .nr_unpack import mod_params_dir, nr_unpack_dir
 
     roots = [settings.project_root_path, settings.game_root_path]
+    if settings.mod_import_root_path and (mod_reg_dir := mod_params_dir(settings.mod_import_root_path)):
+        roots.insert(0, mod_reg_dir.parent)
     if stan_settings is not None:
         roots.append(nr_unpack_dir(stan_settings))
     return [Path(bpy.path.abspath(str(root))) for root in roots if root]

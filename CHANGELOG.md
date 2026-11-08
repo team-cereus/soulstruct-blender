@@ -24,6 +24,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - 'Match Controls to FK Pose' snaps controls onto the keyframed pose, or keys them over a whole animation so vanilla
     clips can be edited with IK (reproduces the FK pose within 0.02 cm on c7720 and c5070).
   - Warns about other constraints on game bones and about re-parented feet/hands.
+- **Mod Files** folder (Stan's Tools → Setup, and Soulstruct settings): loads an installed mod's own files in Blender,
+  read-only, ahead of Project and Game Root.
+  - Nightreign Eclipse's `mod` folder is found automatically (launcher installs in `%LOCALAPPDATA%\Programs`,
+    Documents, Downloads or Desktop). Its ported characters show up in Search Character tagged `[Mod]`, and the
+    mod's edited vanilla ones `[Mod edit]`.
+  - Characters, parts, animations and the mod's MATBINBND materials all come from the mod first. Nothing is ever
+    exported or copied into it.
+  - The mod's own `regulation.bin` params (e.g. NpcParam rows for ported characters) are exported in the background
+    and used ahead of vanilla, and re-exported whenever the mod updates.
+- NrUnpack 1.2.0: `--regulation <file> --out <folder>` writes only the params, from any `regulation.bin`.
 
 ### Fixed
 - FLVER export no longer writes control-rig bones (tagged `soulstruct_control_rig`) into the FLVER skeleton.

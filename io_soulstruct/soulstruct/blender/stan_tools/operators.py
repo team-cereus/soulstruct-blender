@@ -62,6 +62,12 @@ class AutoDetectGameDirectory(LoggingOperator):
             setattr(settings.game_settings, mod_prop, str(mod_path))
             self.info(f"Set mod folder: {mod_path}")
 
+        if settings.is_game(NIGHTREIGN) and not settings.game_settings.mod_import_root_str:
+            from .steam_paths import detect_eclipse_mod_dir
+            if eclipse := detect_eclipse_mod_dir():
+                settings.game_settings.mod_import_root_str = str(eclipse)
+                self.info(f"Set mod files (Nightreign Eclipse): {eclipse}")
+
         if settings.is_game(NIGHTREIGN) and not settings.nightreign_unpack_staging_str:
             decrypted = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack-decrypted")
             staging = Path(r"S:\_modding\tools\soulstruct-blender\_tmp\nr-full-unpack")

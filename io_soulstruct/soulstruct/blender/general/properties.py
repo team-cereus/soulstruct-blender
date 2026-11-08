@@ -89,6 +89,15 @@ def try_load_oodle_dll_for_all_scenes(_dummy=None):
         scene.soulstruct_settings.try_load_oodle_dll()
 
 
+def _remember_folders(self, context: bpy.types.Context):
+    """Save folders for new scenes / sessions (Stan's Tools), so a hand-set Mod Files folder sticks."""
+    try:
+        from ..stan_tools.remembered_folders import remember_folders
+        remember_folders(context)
+    except Exception as ex:  # never break editing the field
+        _LOGGER.warning(f"Could not remember folders: {ex}")
+
+
 @io_soulstruct_properties
 class SoulstructGameSettings(bpy.types.PropertyGroup):
     """Game-specific settings. `SoulstructSettings` retrieves settings from active game's instance of this."""
@@ -117,6 +126,16 @@ class SoulstructGameSettings(bpy.types.PropertyGroup):
                     "in-game/DSAS use when auto-repack is enabled",
         default="",
         subtype="DIR_PATH",
+    )
+
+    mod_import_root_str: bpy.props.StringProperty(
+        name="Mod Files (read-only)",
+        description="An installed mod's game-structured folder (e.g. Nightreign Eclipse's 'mod' folder). Imports "
+                    "look here before Project and Game Root, so the mod's new and edited characters, parts and "
+                    "animations load in Blender. Nothing is ever exported or copied here",
+        default="",
+        subtype="DIR_PATH",
+        update=_remember_folders,
     )
 
     map_stem: bpy.props.StringProperty(
@@ -421,6 +440,22 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
         return Path(project_root_str) if project_root_str else None
 
     @property
+    def mod_import_root_path(self) -> Path | None:
+        """Read-only mod files folder searched before Project/Game Root, if set and present."""
+        mod_import_str = getattr(self.game_settings, "mod_import_root_str", "")
+        if not mod_import_str:
+            return None
+        path = Path(bpy.path.abspath(mod_import_str))
+        if (path / "mod").is_dir() and not (path / "chr").is_dir():
+            path = path / "mod"  # the mod's install folder was picked instead of its 'mod' subfolder
+        return path if path.is_dir() else None
+
+    @property
+    def mod_import_root(self) -> GameStructure | None:
+        path = self.mod_import_root_path
+        return GameStructure(self, path) if path else None
+
+    @property
     def game_root(self) -> GameStructure | None:
         game_root_path = self.game_root_path
         if game_root_path:
@@ -559,11 +594,13 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
                 return
 
     @property
-    def import_roots(self) -> tuple[GameStructure | None, GameStructure | None]:
-        """Return game and project roots in order of preferred import. Each may be `None` if not set."""
+    def import_roots(self) -> tuple[GameStructure | None, ...]:
+        """Return import roots in order of preferred import: the read-only mod files folder (only when set), then
+        game and project roots (either order). Game and project roots may be `None` if not set."""
+        mod_root = (self.mod_import_root,) if self.mod_import_root_path else ()
         if self.prefer_import_from_project:
-            return self.project_root, self.game_root
-        return self.game_root, self.project_root
+            return *mod_root, self.project_root, self.game_root
+        return *mod_root, self.game_root, self.project_root
 
     def all_import_roots(self) -> tuple[GameStructure, ...]:
         """Return import roots plus Nightreign unpack staging when configured."""

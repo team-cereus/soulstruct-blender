@@ -63,3 +63,31 @@ def detect_game_root(game_variable_name: str) -> Path | None:
             if candidate.is_dir() and any(candidate.glob("chr")):
                 return candidate
     return None
+
+
+def detect_eclipse_mod_dir() -> Path | None:
+    """The 'mod' folder of an installed Nightreign Eclipse (Team Cereus launcher), if one is found.
+
+    The launcher installs to `%LOCALAPPDATA%/Programs/Nightreign Eclipse` by default, or next to its exe for older
+    installs (often Documents or Downloads). The most recently updated install wins.
+    """
+    import os
+
+    home = Path.home()
+    bases = [
+        Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local")) / "Programs",
+        home / "Documents",
+        home / "OneDrive" / "Documents",
+        home / "Downloads",
+        home / "Desktop",
+    ]
+    found = []
+    for base in bases:
+        mod = base / "Nightreign Eclipse" / "mod"
+        regulation = mod / "regulation.bin"
+        try:
+            if (mod / "chr").is_dir() and regulation.is_file():
+                found.append((regulation.stat().st_mtime, mod))
+        except OSError:
+            continue
+    return max(found)[1] if found else None

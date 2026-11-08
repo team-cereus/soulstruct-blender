@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>NrUnpack</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <SmithboxDir Condition="'$(SmithboxDir)' == ''">S:\Smithbox</SmithboxDir>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>

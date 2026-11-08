@@ -33,7 +33,7 @@ class AnimationImportExportPanel(SoulstructPanel):
         header, panel = self.layout.panel("Import", default_closed=False)
         header.label(text="Import")
         if panel:
-            if settings.import_roots != (None, None):
+            if any(settings.import_roots):
                 panel.label(text="Import from Game/Project")
                 panel.operator(ImportCharacterHKXAnimation.bl_idname)
                 if settings.is_er_family():

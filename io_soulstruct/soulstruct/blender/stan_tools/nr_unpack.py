@@ -10,6 +10,7 @@ __all__ = [
     "StanUnpackNightreign",
     "default_unpack_dir",
     "ensure_nightreign_params",
+    "mod_params_dir",
     "nr_unpack_dir",
     "unpack_status",
 ]
@@ -32,12 +33,12 @@ from ..general.matdefs import clear_cached_matdefs
 from ..general.properties import SoulstructSettings
 from .steam_paths import detect_game_root
 
-UNPACKER_VERSION = "1.1.0"
+UNPACKER_VERSION = "1.2.0"
 UNPACKER_URL = (
     "https://github.com/team-cereus/soulstruct-blender/releases/download/"
     f"nr-unpack-v{UNPACKER_VERSION}/NrUnpack.exe"
 )
-UNPACKER_SHA256 = "eaa3606f9dc392432203e76bb8514a9da9c87e2208311a24bd8b24cbf7989c58"
+UNPACKER_SHA256 = "42a69086a13e2f6557af855cf6aa847f5f2e5ea283fe7cc35840172678e37d4f"
 _FREE_SPACE_MARGIN = 512 * 1024**2
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -103,6 +104,58 @@ def ensure_nightreign_params(context) -> Path | None:
         return None
     print(f"[Stan's Tools] Exported params to {reg_dir}")
     return reg_dir
+
+
+# Mod regulation.bin files whose param export is running or failed this session, keyed by (path, mtime_ns, size).
+_MOD_PARAMS_STARTED: set[tuple[str, int, int]] = set()
+
+
+def mod_params_dir(mod_root: Path) -> Path | None:
+    """`regulation-bin/` folder holding the params of a mod's own regulation.bin (e.g. Nightreign Eclipse's NpcParam
+    rows for its ported characters), or None while it is not (yet) exported.
+
+    Called from panel draws, so it never blocks: an out-of-date or missing export starts in a background thread (once
+    per regulation.bin version) and the vanilla params are used until it finishes. Re-exports whenever the mod's
+    regulation.bin changes, e.g. after a mod update.
+    """
+    regulation = mod_root / "regulation.bin"
+    try:
+        stat = regulation.stat()
+    except OSError:
+        return None
+    key = (str(regulation.resolve()).lower(), stat.st_mtime_ns, stat.st_size)
+    out_dir = _stan_tools_dir() / "mod-params" / hashlib.sha1(key[0].encode()).hexdigest()[:12]
+    reg_dir = out_dir / "regulation-bin"
+    stamp = out_dir / "source.txt"
+    stamp_text = f"{regulation}\n{stat.st_mtime_ns} {stat.st_size}\n"
+    try:
+        if stamp.read_text(encoding="utf-8") == stamp_text and (reg_dir / "NpcParam.param.xml").is_file():
+            return reg_dir
+    except OSError:
+        pass
+    if key not in _MOD_PARAMS_STARTED:
+        _MOD_PARAMS_STARTED.add(key)
+        threading.Thread(
+            target=_export_mod_params, args=(regulation, out_dir, stamp, stamp_text), daemon=True
+        ).start()
+    return None
+
+
+def _export_mod_params(regulation: Path, out_dir: Path, stamp: Path, stamp_text: str):
+    """Worker thread (no `bpy`): write `out_dir/regulation-bin/*.param.xml` from `regulation`, then the stamp."""
+    try:
+        exe = _ensure_unpacker(_UnpackJob())
+        stamp.unlink(missing_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        args = [str(exe), "--regulation", str(regulation), "--out", str(out_dir)]
+        result = subprocess.run(args, capture_output=True, text=True, creationflags=_NO_WINDOW, timeout=600)
+        if result.returncode != 0 or not (out_dir / "regulation-bin" / "NpcParam.param.xml").is_file():
+            lines = [line for line in (result.stderr + result.stdout).splitlines() if line.strip()]
+            raise RuntimeError(lines[-1] if lines else f"exit {result.returncode}")
+        stamp.write_text(stamp_text, encoding="utf-8")
+        print(f"[Stan's Tools] Exported mod params from {regulation}")
+    except Exception as ex:  # noqa: BLE001  (download, subprocess or disk errors all just mean "vanilla params")
+        print(f"[Stan's Tools] Could not export mod params from {regulation}: {ex}")
 
 
 class _UnpackJob:
