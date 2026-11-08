@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Twist bones (`*Twist*`) and joint helpers (`L_Elbow`, `L_Knee`) are driven from their limbs with ratios calibrated
     from the animations loaded on the Armature (e.g. Elden Ring upper-arm twist -0.97/-0.48, calf twist +1.0/+0.5 of
     foot twist). Thigh twist is left rigid: no limb explains it in vanilla clips.
+  - Twist and helper bones stay hand-editable: the rig applies its rotation first and the bone's own keys add on top.
+    Existing keys on those bones are rewritten as offsets when the rig is added (clips look identical) and converted
+    back when it is removed.
   - 'Match Controls to FK Pose' snaps controls onto the keyframed pose, or keys them over a whole animation so vanilla
     clips can be edited with IK (reproduces the FK pose within 0.02 cm on c7720 and c5070).
   - Warns about other constraints on game bones and about re-parented feet/hands.

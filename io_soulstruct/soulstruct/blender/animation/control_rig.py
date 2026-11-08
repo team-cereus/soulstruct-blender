@@ -224,6 +224,7 @@ class _TwistPlan:
     limb: str
     source: str | None
     ratio: float
+    sibling: bool = False  # Biped layout: twist bone is a child of the limb's parent, not of the limb
 
 
 @dataclass(slots=True)
@@ -334,7 +335,18 @@ def _calibrate(
         source, ratio = (best[0], best[1]) if best else (None, 0.0)
         if source is not None and abs(ratio) < 0.02:
             source, ratio = None, 0.0
-        twist_plans.append(_TwistPlan(twist, limb, source, round(ratio, 3)))
+        parent = bones[twist].parent
+        if parent is not None and parent.name == limb:
+            sibling = False
+        elif parent is not None and parent == bones[limb].parent:
+            sibling = True
+        else:
+            report.warnings.append(
+                f"{twist}: parent '{parent.name if parent else None}' is neither {limb} nor its parent (re-parented?); "
+                f"not driven by the rig."
+            )
+            continue
+        twist_plans.append(_TwistPlan(twist, limb, source, round(ratio, 3), sibling))
 
     helper_plans = []
     for helper, limb in helpers:
@@ -354,6 +366,103 @@ def _calibrate(
         if weight > 0.0:
             helper_plans.append(_HelperPlan(helper, limb, weight))
     return twist_plans, helper_plans
+
+# endregion
+
+
+# region Twist/helper key conversion
+
+_DRIVEN_PREFIXES = (f"{RIG_CONSTRAINT_PREFIX}Twist", f"{RIG_CONSTRAINT_PREFIX}Helper")
+
+
+def _driven_bone_names(armature: ArmatureObject) -> list[str]:
+    """Game bones whose rotation the rig drives 'Before Original' (twist and joint helper bones)."""
+    return [
+        pb.name for pb in armature.pose.bones
+        if not armature.data.bones[pb.name].get(CONTROL_RIG_BONE_PROP)
+        and any(c.name.startswith(_DRIVEN_PREFIXES) for c in pb.constraints)
+        and pb.rotation_mode == "QUATERNION"
+    ]
+
+
+def _local_rotation(armature: ArmatureObject, name: str) -> Quaternion:
+    """Evaluated (post-constraint) rotation of a bone relative to its rest pose in its parent: the value its rotation
+    channel would need to produce the same pose without constraints."""
+    pb = armature.pose.bones[name]
+    bone = armature.data.bones[name]
+    if bone.parent is None:
+        frame = bone.matrix_local.to_quaternion()
+    else:
+        frame = (
+            pb.parent.matrix.to_quaternion()
+            @ bone.parent.matrix_local.to_quaternion().inverted()
+            @ bone.matrix_local.to_quaternion()
+        )
+    return frame.inverted() @ pb.matrix.to_quaternion()
+
+
+def _convert_keys(armature: ArmatureObject, bone_names: list[str], to_residual: bool) -> int:
+    """Rewrite rotation keys of rig-driven bones in every action keying them.
+
+    `to_residual`: keys hold full rotations (as imported) -> store only the remainder on top of the rig.
+    Otherwise: keys hold remainders -> store the full rotation again (before the rig is removed).
+    Evaluated in FK (IK follow constraints muted), which is how the keys were authored. Returns keys rewritten.
+    """
+    if not bone_names or armature.animation_data is None:
+        return 0
+    pose = armature.pose.bones
+    paths = {f'pose.bones["{n}"].rotation_quaternion': n for n in bone_names}
+    ik_constraints = [c for pb in pose for c in pb.constraints if c.name.startswith(f"{RIG_CONSTRAINT_PREFIX}IK")]
+    saved_mutes = [(c, c.mute) for c in ik_constraints]
+    for c, _ in saved_mutes:
+        c.mute = True
+    original_action = armature.animation_data.action
+    scene = bpy.context.scene
+    original_frame = scene.frame_current
+    count = 0
+    try:
+        for action in bpy.data.actions:
+            frames_by_bone = {}  # type: dict[str, set[int]]
+            for layer in getattr(action, "layers", ()):
+                for strip in layer.strips:
+                    for channelbag in strip.channelbags:
+                        for fc in channelbag.fcurves:
+                            if fc.data_path in paths:
+                                frames_by_bone.setdefault(paths[fc.data_path], set()).update(
+                                    int(round(kp.co[0])) for kp in fc.keyframe_points
+                                )
+            if not frames_by_bone:
+                continue
+            armature.animation_data.action = action
+            all_frames = sorted(set().union(*frames_by_bone.values()))
+            previous = {}  # type: dict[str, Quaternion]
+            for frame in all_frames:
+                scene.frame_set(frame)
+                updates = {}
+                for name, frames in frames_by_bone.items():
+                    if frame not in frames:
+                        continue
+                    own = pose[name].rotation_quaternion.copy()
+                    result = _local_rotation(armature, name)
+                    if to_residual:
+                        rig = result @ own.inverted()  # what the rig applies before the channel
+                        new = rig.inverted() @ own
+                    else:
+                        new = result
+                    if name in previous and previous[name].dot(new) < 0.0:
+                        new.negate()
+                    previous[name] = new
+                    updates[name] = new
+                for name, new in updates.items():
+                    pose[name].rotation_quaternion = new
+                    pose[name].keyframe_insert("rotation_quaternion", frame=frame)
+                    count += 1
+    finally:
+        for c, was in saved_mutes:
+            c.mute = was
+        armature.animation_data.action = original_action
+        scene.frame_set(original_frame)
+    return count
 
 # endregion
 
@@ -502,10 +611,10 @@ def build_control_rig(
             axis = _twist_axis(bones, source)
             _new_bone(eb, f"mch_twist_src_{source}", src.head.copy(), src.head + axis * 0.1, src.parent)
         for plan in twist_plans:
-            tw = eb[plan.bone]
-            axis = _twist_axis(bones, plan.limb)
-            driver = _new_bone(eb, f"mch_twist_{plan.bone}", tw.head.copy(), tw.head + axis * 0.1, eb[plan.limb])
-            _copy_bone_matrix(eb, f"mch_twist_follow_{plan.bone}", tw, driver, max(tw.length, 0.05))
+            if plan.source:
+                tw = eb[plan.bone]
+                axis = _twist_axis(bones, plan.limb)
+                _new_bone(eb, f"mch_twist_{plan.bone}", tw.head.copy(), tw.head + axis * 0.1, eb[plan.limb])
     finally:
         bpy.ops.object.mode_set(mode="POSE")
 
@@ -587,9 +696,11 @@ def build_control_rig(
         c.target_space, c.owner_space = "LOCAL_OWNER_ORIENT", "LOCAL"
         c.mix_mode = "REPLACE"
     for plan in twist_plans:
-        # Driver bone (child of the limb, Y along the limb axis) takes `ratio` x the source twist; the game twist
-        # bone copies the world rotation of its follower, so it follows the limb rigidly plus that twist.
+        # All twist constraints use 'Before Original' in local space: the rig's follow/twist is applied first and the
+        # bone's own rotation channels stay on top, so animators can still twist it by hand (see `_convert_keys`).
+        pb = pose[plan.bone]
         if plan.source:
+            # Driver bone (child of the limb, Y along the limb axis) carries `ratio` x the source twist.
             t = pose[f"mch_twist_{plan.bone}"].constraints.new("TRANSFORM")
             t.name = f"{RIG_CONSTRAINT_PREFIX}Twist"
             t.target, t.subtarget = armature, f"mch_twist_src_{plan.source}"
@@ -601,28 +712,42 @@ def build_control_rig(
             t.to_min_y_rot, t.to_max_y_rot = -math.pi * plan.ratio, math.pi * plan.ratio
             t.to_euler_order = "YXZ"
             t.mix_mode_rot = "REPLACE"
-        c = pose[plan.bone].constraints.new("COPY_ROTATION")
-        c.name = f"{RIG_CONSTRAINT_PREFIX}Twist Follow"
-        c.target, c.subtarget = armature, f"mch_twist_follow_{plan.bone}"
-        c.mix_mode = "REPLACE"
+            c = pb.constraints.new("COPY_ROTATION")
+            c.name = f"{RIG_CONSTRAINT_PREFIX}Twist Amount"
+            c.target, c.subtarget = armature, f"mch_twist_{plan.bone}"
+            c.target_space, c.owner_space = "LOCAL_OWNER_ORIENT", "LOCAL"
+            c.mix_mode = "BEFORE"
+        if plan.sibling:
+            # Biped layout: the twist bone hangs off the limb's parent, so it must also be made to follow the limb.
+            # Added after the twist so the result is limb @ twist @ own.
+            c = pb.constraints.new("COPY_ROTATION")
+            c.name = f"{RIG_CONSTRAINT_PREFIX}Twist Follow"
+            c.target, c.subtarget = armature, plan.limb
+            c.target_space, c.owner_space = "LOCAL_OWNER_ORIENT", "LOCAL"
+            c.mix_mode = "BEFORE"
         report.twists.append(
             f"{plan.bone}: follows {plan.limb}" + (f", {plan.ratio:+.2f} x {plan.source} twist" if plan.source else "")
         )
     for plan in helper_plans:
         pb = pose[plan.bone]
-        reset = pb.constraints.new("LIMIT_ROTATION")
-        reset.name = f"{RIG_CONSTRAINT_PREFIX}Helper Reset"
-        reset.owner_space = "LOCAL"
-        reset.use_limit_x = reset.use_limit_y = reset.use_limit_z = True
         c = pb.constraints.new("COPY_ROTATION")
         c.name = f"{RIG_CONSTRAINT_PREFIX}Helper"
         c.target, c.subtarget = armature, plan.limb
         c.target_space, c.owner_space = "LOCAL_OWNER_ORIENT", "LOCAL"
-        c.mix_mode = "REPLACE"
+        c.mix_mode = "BEFORE"
         c.influence = plan.weight
         report.helpers.append(f"{plan.bone}: {plan.weight:.2f} x {plan.limb} rotation")
 
-    # 6. Start the controls on the current pose so nothing jumps.
+    # 6. Existing keys on driven twist/helper bones hold their full (vanilla) rotation, which the rig now supplies:
+    # rewrite them as the remainder on top of the rig, so every clip looks exactly as before and stays editable.
+    converted = _convert_keys(armature, _driven_bone_names(armature), to_residual=True)
+    if converted:
+        report.warnings.append(
+            f"Rewrote {converted} twist/helper keyframes in this character's animations as offsets on top of the rig "
+            f"(clips look unchanged; 'Remove Control Rig' converts them back)."
+        )
+
+    # 7. Start the controls on the current pose so nothing jumps.
     match_controls_to_pose(armature, keyframe=False)
 
     bpy.ops.object.mode_set(mode=prev_mode if prev_mode in {"OBJECT", "POSE"} else "POSE")
@@ -634,6 +759,7 @@ def build_control_rig(
 def remove_control_rig(armature: ArmatureObject) -> int:
     """Remove rig bones, rig constraints (and their drivers) and rig bone collections. Returns removed bone count."""
     rig_bone_names = [b.name for b in armature.data.bones if b.get(CONTROL_RIG_BONE_PROP)]
+    _convert_keys(armature, _driven_bone_names(armature), to_residual=False)
     if armature.animation_data:
         for fcurve in list(armature.animation_data.drivers):
             if f'constraints["{RIG_CONSTRAINT_PREFIX}' in fcurve.data_path or any(
