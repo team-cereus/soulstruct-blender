@@ -52,6 +52,7 @@ class AnimationImportExportPanel(SoulstructPanel):
             header2.label(text="Animation Export Settings")
             if settings_panel:
                 settings_panel.prop(export_settings, "selected_frames_only")
+                settings_panel.prop(export_settings, "bake_constraints")
                 settings_panel.prop(export_settings, "auto_repack_to_mod")
                 if settings.game:
                     settings_panel.label(text="Mod Folder:")

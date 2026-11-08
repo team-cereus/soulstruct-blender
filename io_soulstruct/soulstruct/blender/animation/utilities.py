@@ -23,6 +23,7 @@ __all__ = [
     "resolve_duplicate_animated_bone_names",
     "get_basis_trs",
     "get_pose_trs_from_basis",
+    "get_constraint_posed_bone_names",
     "add_keyframes_batch",
 ]
 
@@ -739,6 +740,40 @@ def get_pose_trs_from_basis(
     rest_rel = _trs_left_divide(*parent_rest_trs, *rest_trs)
     local_pose = _trs_compose(*rest_rel, *basis_trs)
     return _trs_compose(*parent_pose_trs, *local_pose)
+
+
+def _is_constraint_active(constraint: bpy.types.Constraint) -> bool:
+    if constraint.mute or constraint.influence <= 0.0:
+        return False
+    return getattr(constraint, "is_valid", True)
+
+
+def get_constraint_posed_bone_names(armature: ArmatureObject) -> set[str]:
+    """Return the names of every bone whose evaluated pose can differ from its keyframed pose channels because of an
+    active (unmuted, valid, nonzero-influence) bone constraint.
+
+    That is each constrained bone itself, plus every bone an IK or Spline IK constraint moves: the owner and its
+    `chain_count - 1` Blender ancestors (all ancestors when `chain_count` is 0). Descendants are NOT included: export
+    recomposes them from their own channels on top of their parent's evaluated pose, which is already correct.
+
+    Object-level constraints on the Armature itself are not considered (root motion is read from the object
+    channels separately).
+    """
+    posed = set()  # type: set[str]
+    for pose_bone in armature.pose.bones:
+        for constraint in pose_bone.constraints:
+            if not _is_constraint_active(constraint):
+                continue
+            posed.add(pose_bone.name)
+            if constraint.type in {"IK", "SPLINE_IK"}:
+                chain_count = constraint.chain_count
+                parent = pose_bone.parent
+                depth = 1
+                while parent is not None and (chain_count == 0 or depth < chain_count):
+                    posed.add(parent.name)
+                    parent = parent.parent
+                    depth += 1
+    return posed
 
 
 def add_keyframes_batch(

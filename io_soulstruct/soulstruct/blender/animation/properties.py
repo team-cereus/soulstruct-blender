@@ -21,6 +21,14 @@ class AnimationExportSettings(bpy.types.PropertyGroup):
         default=False,
     )
 
+    bake_constraints: bpy.props.BoolProperty(
+        name="Bake Constraints",
+        description="Export the pose you see in the viewport for bones moved by constraints (IK, Copy Transforms, "
+                    "Child Of, etc.), including the bones in each IK chain. Without this, export reads only keyframed "
+                    "channel values and every constraint is ignored",
+        default=True,
+    )
+
     auto_repack_to_mod: bpy.props.BoolProperty(
         name="Auto-Repack to Mod Folder",
         description="After exporting a character animation, copy the full repacked ANIBND into the Mod Folder's chr\\ "

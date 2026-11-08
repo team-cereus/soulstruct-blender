@@ -558,6 +558,31 @@ class SoulstructAnimation:
         # FLVER local bone scale that the rest pose could not store, which import divided out of the pose scale.
         flver_rest_scales = get_flver_bone_rest_scales(armature, bone_data_type)
 
+        # Bones moved by constraints (IK chains, Copy Transforms, Child Of, ...). Their keyframed channels do not
+        # describe what the animator sees, so with `bake_constraints` we read their evaluated pose instead.
+        hkx_bone_names = {bone.name for bone in skeleton_hkx.skeleton.bones}
+        constraint_posed_names = get_constraint_posed_bone_names(armature)
+        # Any constrained bone (even a control bone outside the HKX skeleton) can be an ancestor of an exported bone.
+        exported_affected = sorted(
+            name for name in hkx_bone_names
+            if name in bl_bones_by_name and self._has_posed_ancestor_or_self(armature, name, constraint_posed_names)
+        )
+        if export_settings.bake_constraints:
+            baked_bone_names = constraint_posed_names
+            if exported_affected:
+                operator.info(
+                    f"Baking constraint pose into {len(exported_affected)} exported bone(s): "
+                    f"{', '.join(exported_affected[:12])}{' ...' if len(exported_affected) > 12 else ''}"
+                )
+        else:
+            baked_bone_names = set()
+            if exported_affected:
+                operator.warning(
+                    f"{len(exported_affected)} exported bone(s) are moved by constraints, which are IGNORED because "
+                    f"'Bake Constraints' is off; the game will get their keyframed pose instead: "
+                    f"{', '.join(exported_affected[:12])}{' ...' if len(exported_affected) > 12 else ''}"
+                )
+
         def _get_pose_trs(bone_name: str, cache: dict[str, TRS]) -> TRS:
             """Recursively reconstruct `bone_name`'s armature-space (translation, rotation, scale) target from its
             pose channel values (the `matrix_basis`-equivalent written on import) via shear-free TRS composition,
@@ -571,6 +596,12 @@ class SoulstructAnimation:
             if bone_name in cache:
                 return cache[bone_name]
             pose_bone = armature.pose.bones[bone_name]
+            if bone_name in baked_bone_names:
+                # Evaluated armature-space pose, constraints included. Constraint-driven bones carry no scale in
+                # practice, so the shear concern above does not apply; descendants still recompose from channels.
+                result = pose_bone.matrix.decompose()
+                cache[bone_name] = result
+                return result
             basis_trs = (pose_bone.location.copy(), pose_bone.rotation_quaternion.copy(), pose_bone.scale.copy())
             rest_trs = rest_trs_by_bone_name[bone_name]
             bl_bone = armature.data.bones[bone_name]
@@ -712,6 +743,15 @@ class SoulstructAnimation:
     # endregion
 
     # region Utilities
+
+    @staticmethod
+    def _has_posed_ancestor_or_self(armature: ArmatureObject, bone_name: str, posed_names: set[str]) -> bool:
+        bone = armature.data.bones[bone_name]
+        while bone is not None:
+            if bone.name in posed_names:
+                return True
+            bone = bone.parent
+        return False
 
     @staticmethod
     def iter_action_fcurves(

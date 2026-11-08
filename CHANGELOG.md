@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
 
+### Added
+- Animation export option **Bake Constraints** (on by default). Bones moved by bone constraints (IK chains, Copy
+  Transforms, Child Of, ...) now export the pose shown in the viewport instead of their keyframed channels.
+  - Export previously ignored every constraint, so hand-built IK rigs exported the underlying FK keys (feet ~0.6-0.8 m
+    off on a test rig). Animations without constraints export byte-identical either way.
+  - With the option off, export warns which bones' constraints are being ignored.
+
 ---
 
 ## [3.2.1] - 2026-09-27
