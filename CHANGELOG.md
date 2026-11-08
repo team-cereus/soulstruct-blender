@@ -11,6 +11,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Export previously ignored every constraint, so hand-built IK rigs exported the underlying FK keys (feet ~0.6-0.8 m
     off on a test rig). Animations without constraints export byte-identical either way.
   - With the option off, export warns which bones' constraints are being ignored.
+- **Control Rig** (Animation Tools panel): one-click IK rig for FromSoftware humanoids, in both bone naming schemes
+  (`L Thigh` / `LUpArmTwist` Biped style and `L_Thigh` / `L_UpArmTwist1` Elden Ring style).
+  - Foot/hand IK controls and knee/elbow poles under `Master`, with an IK/FK slider per limb. IK is solved on a clean
+    mechanism chain that the game bones copy, so 1 cm Elden Ring limb bones and keyed thigh/shoulder offsets work.
+  - Twist bones (`*Twist*`) and joint helpers (`L_Elbow`, `L_Knee`) are driven from their limbs with ratios calibrated
+    from the animations loaded on the Armature (e.g. Elden Ring upper-arm twist -0.97/-0.48, calf twist +1.0/+0.5 of
+    foot twist). Thigh twist is left rigid: no limb explains it in vanilla clips.
+  - 'Match Controls to FK Pose' snaps controls onto the keyframed pose, or keys them over a whole animation so vanilla
+    clips can be edited with IK (reproduces the FK pose within 0.02 cm on c7720 and c5070).
+  - Warns about other constraints on game bones and about re-parented feet/hands.
+
+### Fixed
+- FLVER export no longer writes control-rig bones (tagged `soulstruct_control_rig`) into the FLVER skeleton.
 
 ---
 
