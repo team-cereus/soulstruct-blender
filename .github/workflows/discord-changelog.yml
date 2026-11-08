@@ -1,0 +1,30 @@
+# Every push to main is an update: the Stan's Tools updater fast-forwards installs to origin/main.
+# Posts that push's new CHANGELOG.md entries (or its feat/fix/perf commit subjects) to the team's Discord channel.
+# The webhook is the DISCORD_WEBHOOK repo secret; tools/discord_post.py never prints it.
+name: Discord changelog
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: discord-changelog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+      - name: Post update notes
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then echo "no DISCORD_WEBHOOK secret; nothing posted"; exit 0; fi
+          python3 tools/discord_post.py --range "${{ github.event.before }}..${{ github.sha }}" --post
