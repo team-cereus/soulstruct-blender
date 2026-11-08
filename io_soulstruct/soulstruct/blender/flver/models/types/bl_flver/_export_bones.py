@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "CONTROL_RIG_BONE_PROP",
     "create_flver_bones",
 ]
 
@@ -25,6 +26,11 @@ from ....utilities import BONE_CoB_4x4
 from ..enums import FLVERBoneDataType
 
 
+# Custom property set on animator control-rig bones (IK controls, poles, mechanism bones). They are Blender-only:
+# FLVER export skips them so they never become game bones.
+CONTROL_RIG_BONE_PROP = "soulstruct_control_rig"
+
+
 def create_flver_bones(
     operator: LoggingOperator,
     context: bpy.types.Context,
@@ -38,7 +44,18 @@ def create_flver_bones(
     CUSTOM mode (custom properties set on Blender `Bone`), according to `bone_data_type`.
     """
 
-    bl_bone_names = [bone.name for bone in armature.data.bones]
+    exported_bl_bones = [bone for bone in armature.data.bones if not bone.get(CONTROL_RIG_BONE_PROP)]
+    if len(exported_bl_bones) != len(armature.data.bones):
+        for bone in exported_bl_bones:
+            if bone.parent and bone.parent.get(CONTROL_RIG_BONE_PROP):
+                raise FLVERExportError(
+                    f"Bone '{bone.name}' is parented to control-rig bone '{bone.parent.name}', which is not exported. "
+                    f"Remove the control rig or re-parent the bone before exporting the FLVER."
+                )
+        operator.info(
+            f"Skipping {len(armature.data.bones) - len(exported_bl_bones)} control-rig bone(s) in FLVER export."
+        )
+    bl_bone_names = [bone.name for bone in exported_bl_bones]
 
     bone_tree = BoneTree()
     game_bone_parent_indices = []  # type: list[int]
@@ -54,7 +71,7 @@ def create_flver_bones(
     # TODO: Check properties on data bone, not EditBone.
     #  Always read scale from FLVER_BONE properties.
 
-    for bl_bone in armature.data.bones:
+    for bl_bone in exported_bl_bones:
 
         # We ALWAYS read (local) bone scale from stored properties, as EditBones cannot store scale.
         game_scale = to_game(Vector(bl_bone.FLVER_BONE.flver_scale))

@@ -11,6 +11,7 @@ from .import_operators import *
 from .export_operators import *
 from .misc_operators import *
 from .skeleton_operators import *
+from .control_rig import AddControlRig, RemoveControlRig, MatchControlsToPose
 
 
 @io_soulstruct_panel
@@ -92,4 +93,15 @@ class AnimationToolsPanel(SoulstructPanel):
 
     def draw(self, context):
         self.layout.operator(SelectArmatureActionOperator.bl_idname)
+
+        header, panel = self.layout.panel("Control Rig", default_closed=False)
+        header.label(text="Control Rig (humanoids)")
+        if panel:
+            panel.operator(AddControlRig.bl_idname)
+            panel.operator(MatchControlsToPose.bl_idname)
+            panel.operator(RemoveControlRig.bl_idname)
+            pose_bone = context.active_pose_bone
+            if pose_bone is not None and pose_bone.name.startswith("ctrl_") and "ik" in pose_bone:
+                panel.prop(pose_bone, '["ik"]', text=f"IK/FK ({pose_bone.name})", slider=True)
+            panel.label(text="Export animations with 'Bake Constraints' on.")
         # TODO: decimate operator with ratio field
