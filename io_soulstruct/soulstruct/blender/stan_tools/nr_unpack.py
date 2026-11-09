@@ -11,6 +11,7 @@ __all__ = [
     "default_unpack_dir",
     "ensure_nightreign_params",
     "mod_params_dir",
+    "mod_params_status",
     "nr_unpack_dir",
     "unpack_status",
 ]
@@ -106,8 +107,10 @@ def ensure_nightreign_params(context) -> Path | None:
     return reg_dir
 
 
-# Mod regulation.bin files whose param export is running or failed this session, keyed by (path, mtime_ns, size).
-_MOD_PARAMS_STARTED: set[tuple[str, int, int]] = set()
+# Mod regulation.bin param exports this session, keyed by (path, mtime_ns, size): start time, and error text if failed.
+_MOD_PARAMS_STARTED: dict[tuple[str, int, int], float] = {}
+_MOD_PARAMS_ERRORS: dict[tuple[str, int, int], str] = {}
+_MOD_PARAMS_RETRY_SECONDS = 60.0  # e.g. regulation.bin was locked by the running game or a launcher update
 
 
 def mod_params_dir(mod_root: Path) -> Path | None:
@@ -133,15 +136,30 @@ def mod_params_dir(mod_root: Path) -> Path | None:
             return reg_dir
     except OSError:
         pass
-    if key not in _MOD_PARAMS_STARTED:
-        _MOD_PARAMS_STARTED.add(key)
+    import time
+
+    started = _MOD_PARAMS_STARTED.get(key)
+    if started is None or (key in _MOD_PARAMS_ERRORS and time.time() - started > _MOD_PARAMS_RETRY_SECONDS):
+        _MOD_PARAMS_STARTED[key] = time.time()
+        _MOD_PARAMS_ERRORS.pop(key, None)
         threading.Thread(
-            target=_export_mod_params, args=(regulation, out_dir, stamp, stamp_text), daemon=True
+            target=_export_mod_params, args=(key, regulation, out_dir, stamp, stamp_text), daemon=True
         ).start()
     return None
 
 
-def _export_mod_params(regulation: Path, out_dir: Path, stamp: Path, stamp_text: str):
+def mod_params_status(mod_root: Path) -> str:
+    """'' when the mod's params are ready or not applicable, else a short status for the Setup panel."""
+    regulation = mod_root / "regulation.bin"
+    if not regulation.is_file() or mod_params_dir(mod_root) is not None:
+        return ""
+    for key, error in _MOD_PARAMS_ERRORS.items():
+        if key[0] == str(regulation.resolve()).lower():
+            return f"Mod params failed (retrying): {error}"
+    return "Reading the mod's params..."
+
+
+def _export_mod_params(key, regulation: Path, out_dir: Path, stamp: Path, stamp_text: str):
     """Worker thread (no `bpy`): write `out_dir/regulation-bin/*.param.xml` from `regulation`, then the stamp."""
     try:
         exe = _ensure_unpacker(_UnpackJob())
@@ -155,6 +173,7 @@ def _export_mod_params(regulation: Path, out_dir: Path, stamp: Path, stamp_text:
         stamp.write_text(stamp_text, encoding="utf-8")
         print(f"[Stan's Tools] Exported mod params from {regulation}")
     except Exception as ex:  # noqa: BLE001  (download, subprocess or disk errors all just mean "vanilla params")
+        _MOD_PARAMS_ERRORS[key] = str(ex)[:200]
         print(f"[Stan's Tools] Could not export mod params from {regulation}: {ex}")
 
 

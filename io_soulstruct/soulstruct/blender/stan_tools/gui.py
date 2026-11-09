@@ -107,6 +107,9 @@ class StanSetupPanel(_StanToolsPanel):
         if mod_files:
             count = sum(1 for _ in (mod_files / "chr").glob("c*.chrbnd*")) if (mod_files / "chr").is_dir() else 0
             layout.label(text=f"Loading mod files first: {count} character(s)", icon="CHECKMARK")
+            from .nr_unpack import mod_params_status
+            if status := mod_params_status(mod_files):
+                layout.label(text=status, icon="ERROR" if "failed" in status else "TIME")
         elif settings.game_settings.mod_import_root_str:
             layout.label(text="Folder not found", icon="ERROR")
 

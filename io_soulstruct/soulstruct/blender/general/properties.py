@@ -595,18 +595,45 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
 
     @property
     def import_roots(self) -> tuple[GameStructure | None, ...]:
-        """Return import roots in order of preferred import: the read-only mod files folder (only when set), then
-        game and project roots (either order). Game and project roots may be `None` if not set."""
+        """Return import roots in order of preferred import: the read-only mod files folder (only when set), game and
+        project roots (either order), then, for Nightreign, the unpack staging and Stan's Tools Unpack Folder when they
+        exist and are not already roots. Game and project roots may be `None` if not set."""
         mod_root = (self.mod_import_root,) if self.mod_import_root_path else ()
         if self.prefer_import_from_project:
-            return *mod_root, self.project_root, self.game_root
-        return *mod_root, self.game_root, self.project_root
+            main = (self.project_root, self.game_root)
+        else:
+            main = (self.game_root, self.project_root)
+        return *mod_root, *main, *self._fallback_import_roots(mod_root + main)
+
+    def _fallback_import_roots(self, roots: tuple[GameStructure | None, ...]) -> tuple[GameStructure, ...]:
+        """Nightreign loose-file folders searched last, so vanilla files are found even when Project Root points at an
+        export workspace (or nowhere) and Game Root is the packed Steam install."""
+        if not self.is_game(GameType.Nightreign):
+            return ()
+        paths = [self.nightreign_unpack_staging_path]
+        try:
+            from ..stan_tools.nr_unpack import nr_unpack_dir
+            paths.append(nr_unpack_dir(self.id_data.stan_tools_settings))
+        except Exception:  # Stan's Tools not registered, or settings not on a Scene
+            pass
+        seen = {str(Path(bpy.path.abspath(str(r.root)))).lower() for r in roots if r is not None}
+        fallbacks = []
+        for path in paths:
+            if not path or not is_path_and_dir(path) or not (path / "chr").is_dir():
+                continue
+            key = str(Path(bpy.path.abspath(str(path)))).lower()
+            if key not in seen:
+                seen.add(key)
+                fallbacks.append(GameStructure(self, path))
+        return tuple(fallbacks)
 
     def all_import_roots(self) -> tuple[GameStructure, ...]:
         """Return import roots plus Nightreign unpack staging when configured."""
         roots: list[GameStructure | None] = list(self.import_roots)
         if self.is_game(GameType.Nightreign) and is_path_and_dir(self.nightreign_unpack_staging_path):
-            roots.append(GameStructure(self, self.nightreign_unpack_staging_path))
+            staging = self.nightreign_unpack_staging_path
+            if all(r is None or Path(r.root) != staging for r in roots):
+                roots.append(GameStructure(self, staging))
         return tuple(root for root in roots if root is not None)
 
     def get_first_existing_import_root(self) -> Path | None:

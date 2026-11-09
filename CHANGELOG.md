@@ -36,6 +36,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - NrUnpack 1.2.0: `--regulation <file> --out <folder>` writes only the params, from any `regulation.bin`.
 
 ### Fixed
+- Search Character showed only the mod's characters when Project Root was missing or unpacked nothing: Nightreign now
+  also searches the Unpack Folder (and unpack staging) last, so all vanilla characters are listed again.
+- Character names: mod characters are named from the Eclipse port roster (`character_names/eclipse.json`, regenerated
+  by `tools/gen_eclipse_names.py`) and from the mod's own NpcParam + NpcName text; Nightreign also falls back to the
+  Elden Ring names, so most vanilla characters that showed only an id now have a name. c0000 is labelled as the human
+  body.
+- The mod's params export retries after a minute when it fails (e.g. `regulation.bin` locked by the running game), and
+  Setup shows its status.
 - FLVER export no longer writes control-rig bones (tagged `soulstruct_control_rig`) into the FLVER skeleton.
 
 ---

@@ -57,6 +57,15 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
     items: list[tuple[str, str, str]] = []
     seen_stems: set[str] = set()
     mod_chr_dir = settings.mod_import_root_path / "chr" if settings.mod_import_root_path else None
+    if mod_chr_dir:
+        from .mod_names import eclipse_roster_names, mod_character_names
+        # The port roster first (one curated name per model), then the names the mod's own NpcParam rows show in game.
+        mod_names = {
+            **mod_character_names(settings.mod_import_root_path, context.scene.stan_tools_settings),
+            **(eclipse_roster_names() if "eclipse" in str(settings.mod_import_root_path).lower() else {}),
+        }
+    else:
+        mod_names = {}
     vanilla_stems = {
         m.group(1).lower()
         for d in chr_dirs if d != mod_chr_dir
@@ -76,7 +85,10 @@ def build_character_search_items(context: bpy.types.Context) -> list[tuple[str, 
                 model_num = int(stem[1:])
             except ValueError:
                 continue
-            display = names.get(model_num)
+            if chr_dir == mod_chr_dir and stem not in vanilla_stems:
+                display = mod_names.get(model_num) or names.get(model_num)  # the mod's own character
+            else:
+                display = names.get(model_num) or mod_names.get(model_num)
             if display:
                 label = f"{stem} - {display}"
             else:

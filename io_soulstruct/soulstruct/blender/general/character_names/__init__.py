@@ -65,5 +65,11 @@ def get_character_name_map(settings: SoulstructSettings) -> dict[int, str]:
     fallback = _load_character_models_fallback(submodule)
     for model_id, display in fallback.items():
         names.setdefault(model_id, display)
+    if submodule == "nightreign":
+        # Most Nightreign characters are Elden Ring models that nightreign.json does not list.
+        for model_id, display in _load_json(_DIR / "eldenring.json").items():
+            names.setdefault(model_id, display)
+        for model_id, display in _load_character_models_fallback("eldenring").items():
+            names.setdefault(model_id, display)
 
     return names
