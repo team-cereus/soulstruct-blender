@@ -66,6 +66,11 @@ def _load_state(repo: Path) -> dict:
 
 
 def _save_state(repo: Path, state: dict):
+    # Callers hold their own copy for a while (`on_startup`, the enable timer): keep the newest update status.
+    on_disk = _load_state(repo).get("update_status")
+    mine = state.get("update_status")
+    if on_disk and (not mine or on_disk.get("time", 0) > mine.get("time", 0)):
+        state["update_status"] = on_disk
     (repo / ".git" / "stan_tools_state.json").write_text(json.dumps(state, indent=2))
 
 
@@ -73,8 +78,13 @@ def apply_pending_update(repo: Path, git: str) -> bool:
     """Fast-forward to the fetched upstream and check out matching submodules. Returns True if it updated."""
     if not _is_behind(repo, git):
         return False
-    if _git(repo, git, "status", "--porcelain", "--untracked-files=no"):
-        _log(f"Update available, but {repo} has local changes. Skipping.")
+    # Submodules are left out: one at another commit (e.g. an interrupted update) is put right below, and must not
+    # block every later update.
+    changed = _git(repo, git, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all")
+    if changed:
+        files = [line.split(maxsplit=1)[-1] for line in changed.splitlines()][:5]  # `_git` strips line 1
+        _log(f"Update available, but {repo} has local changes ({', '.join(files)}). Skipping.")
+        _record_status(repo, "blocked", f"local changes: {', '.join(files)}")
         return False
     old = _git(repo, git, "rev-parse", "--short", "HEAD")
     _git(repo, git, "merge", "--ff-only", "--quiet", "@{u}")
@@ -84,8 +94,42 @@ def apply_pending_update(repo: Path, git: str) -> bool:
     except RuntimeError:
         # The background fetch normally brings submodule commits along; download them now if it did not.
         _git(repo, git, "submodule", "update", "--init", "--recursive", "--quiet", timeout=300)
-    _log(f"Updated {old} -> {_git(repo, git, 'rev-parse', '--short', 'HEAD')}.")
+    new = _git(repo, git, "rev-parse", "--short", "HEAD")
+    _log(f"Updated {old} -> {new}.")
+    _record_status(repo, "updated", f"{old} -> {new}")
     return True
+
+
+def _record_status(repo: Path, status: str, detail: str = ""):
+    """Last update result, shown in Stan's Tools → Setup (`stan_tools/updates.py` reads it)."""
+    import time
+
+    state = _load_state(repo)
+    state["update_status"] = {"status": status, "detail": detail, "time": time.time()}
+    _save_state(repo, state)
+
+
+def check_for_update(repo: Path, git: str) -> str:
+    """Fetch now and record the result: 'available' (applied on the next Blender start), 'up_to_date', 'blocked'
+    (local changes or local commits) or 'error'. Blocks for the fetch; run it off the main thread."""
+    try:
+        _git(repo, git, "fetch", "--quiet", "--recurse-submodules=on-demand", timeout=300)
+    except Exception as ex:  # offline, GitHub down, ...
+        _record_status(repo, "error", str(ex)[:200])
+        return "error"
+    if _git(repo, git, "rev-parse", "HEAD") == _git(repo, git, "rev-parse", "@{u}"):
+        _record_status(repo, "up_to_date")
+        return "up_to_date"
+    if not _is_behind(repo, git):
+        _record_status(repo, "blocked", "this clone has its own commits (a dev checkout?)")
+        return "blocked"
+    changed = _git(repo, git, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all")
+    if changed:
+        files = [line.split(maxsplit=1)[-1] for line in changed.splitlines()][:5]  # `_git` strips line 1
+        _record_status(repo, "blocked", f"local changes: {', '.join(files)}")
+        return "blocked"
+    _record_status(repo, "available", _git(repo, git, "rev-parse", "--short", "@{u}"))
+    return "available"
 
 
 def _vendored_wheels(repo: Path) -> list[str]:
@@ -136,8 +180,7 @@ def sync_dependencies(repo: Path, state: dict):
 def _fetch_in_background(repo: Path, git: str):
     def work():
         try:
-            _git(repo, git, "fetch", "--quiet", "--recurse-submodules=on-demand", timeout=300)
-            if _is_behind(repo, git):
+            if check_for_update(repo, git) == "available":
                 _update_downloaded.set()
         except Exception as ex:  # offline, GitHub down, ...: try again next launch
             _log(f"Update check failed: {ex}")
@@ -198,6 +241,7 @@ def _enable_addon_once(repo: Path, state: dict):
 def on_startup(repo: Path, git: str):
     repo = Path(repo)
     state = _load_state(repo)
+    state["git"] = str(git)  # for the Setup panel's 'Check for Updates' button
     try:
         try:
             apply_pending_update(repo, git)

@@ -21,12 +21,15 @@ from .character_search import _iter_chr_directories
 from ..animation.export_operators import ExportCharacterHKXAnimation
 
 from .character_search import StanSearchCharacterToImport
+from .updates import StanCheckForUpdates, draw_update_status  # noqa: F401 (registers the operator)
+from .version import STAN_TOOLS_VERSION
 from .animation_search import StanSearchCharacterAnimation
 from .weapon_search import StanSearchWeaponToImport, _iter_parts_directories
 from .weapon_anim import StanLoadWeaponAttackAnimation
 from .player_character import StanLoadPlayerCharacter, is_player_character_loaded
 from .operators import (
     AutoDetectGameDirectory,
+    StanFindEclipseModFiles,
     StanRefreshNpcParamList,
     StanRefreshC0000SubAnibndList,
     StanApplyNpcParamDrawMask,
@@ -77,10 +80,15 @@ class StanSetupPanel(_StanToolsPanel):
     bl_idname = "VIEW_PT_stan_tools_setup"
     bl_options = {"DEFAULT_CLOSED"}
 
+    def draw_header_preset(self, context):
+        self.layout.label(text=f"v{STAN_TOOLS_VERSION}")
+
     def draw(self, context):
         layout = self.layout
         settings = context.scene.soulstruct_settings
         export_settings = context.scene.animation_export_settings
+
+        draw_update_status(layout)
 
         layout.label(text="Game & folders for animation modding", icon="INFO")
 
@@ -101,7 +109,10 @@ class StanSetupPanel(_StanToolsPanel):
         layout.label(text="Mod Folder (DSAS / ModEngine):")
         layout.prop(settings.game_settings, settings.get_mod_root_prop_name(), text="")
 
-        layout.label(text="Mod Files to load (e.g. Eclipse's 'mod' folder):")
+        row = layout.row(align=True)
+        row.label(text="Mod Files to load (e.g. Eclipse's 'mod' folder):")
+        if settings.is_game(NIGHTREIGN):
+            row.operator(StanFindEclipseModFiles.bl_idname, text="", icon="VIEWZOOM")
         layout.prop(settings.game_settings, "mod_import_root_str", text="")
         mod_files = settings.mod_import_root_path
         if mod_files:

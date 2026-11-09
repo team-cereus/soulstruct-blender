@@ -123,6 +123,19 @@ def _apply_remembered_folders(scene: bpy.types.Scene) -> bool:
         applied = True
     if applied and untouched_scene and data.get("game"):
         settings.game_enum = data["game"]  # a fresh default scene: open on the game you last set up
+
+    # No saved Nightreign folders at all (never ran Unpack / Auto-Detect): still find an installed Eclipse, once.
+    nightreign = settings.nightreign
+    if "NIGHTREIGN" not in data.get("games", {}) and not nightreign.mod_import_root_str and not data.get("eclipse_checked"):
+        from .steam_paths import detect_eclipse_mod_dir
+
+        data["eclipse_checked"] = True
+        _save(data)
+        if detected := detect_eclipse_mod_dir():
+            nightreign.mod_import_root_str = str(detected)
+            data.setdefault("games", {})["NIGHTREIGN"] = {"mod_import_root": str(detected)}
+            _save(data)
+            applied = True
     return applied
 
 

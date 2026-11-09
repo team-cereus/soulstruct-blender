@@ -115,6 +115,11 @@ def build_messages(before: str, after: str) -> list[dict]:
     if not groups:
         return []
     short = git("rev-parse", "--short", after).strip()
+    try:
+        version_py = git("show", f"{after}:io_soulstruct/soulstruct/blender/stan_tools/version.py")
+        version = re.search(r'STAN_TOOLS_VERSION = "([^"]+)"', version_py).group(1)
+    except (subprocess.CalledProcessError, AttributeError):
+        version = ""
     sections = [f"**{name}**\n" + "\n".join(items) for name, items in groups.items()]
     # Split into embeds of at most EMBED_LIMIT characters, never inside a bullet.
     chunks, chunk = [], ""
@@ -134,7 +139,7 @@ def build_messages(before: str, after: str) -> list[dict]:
     for i, text in enumerate(chunks):
         embed = {"color": 0xD58A3A, "description": text, "footer": {"text": f"Team Cereus · {short}"}}
         if i == 0:
-            embed["title"] = "Soulstruct Blender update"
+            embed["title"] = f"Stan's Tools {version}" if version else "Soulstruct Blender update"
             embed["url"] = compare
         if i == len(chunks) - 1:
             embed["fields"] = [{

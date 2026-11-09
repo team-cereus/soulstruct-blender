@@ -68,26 +68,44 @@ def detect_game_root(game_variable_name: str) -> Path | None:
 def detect_eclipse_mod_dir() -> Path | None:
     """The 'mod' folder of an installed Nightreign Eclipse (Team Cereus launcher), if one is found.
 
-    The launcher installs to `%LOCALAPPDATA%/Programs/Nightreign Eclipse` by default, or next to its exe for older
-    installs (often Documents or Downloads). The most recently updated install wins.
+    The launcher installs to `%LOCALAPPDATA%/Programs/Nightreign Eclipse` by default, next to its exe for older
+    installs (often Documents or Downloads), or wherever the player moved it. Any folder the launcher's own log
+    (`%LOCALAPPDATA%/Nightreign Eclipse/me3-output.log`) loaded mod files from also counts. The most recently updated
+    install wins.
     """
     import os
+    import string
 
     home = Path.home()
-    bases = [
-        Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local")) / "Programs",
-        home / "Documents",
-        home / "OneDrive" / "Documents",
-        home / "Downloads",
-        home / "Desktop",
-    ]
+    local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+    bases = [local / "Programs", home / "Documents", home / "OneDrive" / "Documents", home / "Downloads", home / "Desktop"]
+    bases += [Path(f"{d}:/") for d in string.ascii_uppercase if os.path.exists(f"{d}:/")]
+    candidates = [base / "Nightreign Eclipse" / "mod" for base in bases] + _mod_dirs_from_launcher_log(local)
     found = []
-    for base in bases:
-        mod = base / "Nightreign Eclipse" / "mod"
+    seen = set()
+    for mod in candidates:
         regulation = mod / "regulation.bin"
         try:
-            if (mod / "chr").is_dir() and regulation.is_file():
-                found.append((regulation.stat().st_mtime, mod))
+            key = str(mod.resolve()).lower()
+            if key not in seen and (mod / "chr").is_dir() and regulation.is_file():
+                seen.add(key)
+                found.append((regulation.stat().st_mtime, str(mod)))
         except OSError:
             continue
-    return max(found)[1] if found else None
+    return Path(max(found)[1]) if found else None
+
+
+def _mod_dirs_from_launcher_log(local_appdata: Path) -> list[Path]:
+    """'mod' folders the Eclipse launcher's last game start loaded files from (paths like '.../mod/chr/...')."""
+    log = local_appdata / "Nightreign Eclipse" / "me3-output.log"
+    try:
+        text = log.read_text(encoding="utf-8", errors="ignore")[-2_000_000:]
+    except OSError:
+        return []
+    text = text.replace("\\\\", "\\")  # the log escapes backslashes in quoted paths
+    dirs = []
+    for match in re.finditer(r'([A-Za-z]:\\[^"\r\n]*?)\\mod\\(?:chr|parts|regulation\.bin)', text):
+        path = Path(match.group(1)) / "mod"
+        if path not in dirs:
+            dirs.append(path)
+    return dirs

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = [
     "AutoDetectGameDirectory",
+    "StanFindEclipseModFiles",
     "StanRefreshNpcParamList",
     "StanRefreshC0000SubAnibndList",
     "StanApplyNpcParamDrawMask",
@@ -26,6 +27,29 @@ from .mesh_mask_visibility import show_all_character_meshes
 from .npc_param import find_character_armature, _resolve_npc_param_xml_path
 from .scene_lighting import apply_scene_lighting, remove_scene_lighting
 from ..base.register import io_soulstruct_operator
+
+
+@io_soulstruct_operator
+class StanFindEclipseModFiles(LoggingOperator):
+    bl_idname = "stan_tools.find_eclipse_mod_files"
+    bl_label = "Find Nightreign Eclipse"
+    bl_description = (
+        "Find the installed Nightreign Eclipse (Team Cereus launcher) and load its 'mod' folder's files in Blender"
+    )
+
+    def execute(self, context):
+        from .steam_paths import detect_eclipse_mod_dir
+
+        settings = SoulstructSettings.from_context(context)
+        found = detect_eclipse_mod_dir()
+        if found is None:
+            return self.error(
+                "Nightreign Eclipse not found. Start the game once with the Eclipse launcher, or pick its 'mod' "
+                "folder by hand."
+            )
+        settings.game_settings.mod_import_root_str = str(found)
+        self.info(f"Loading Nightreign Eclipse mod files from {found}")
+        return {"FINISHED"}
 
 
 @io_soulstruct_operator

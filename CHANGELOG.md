@@ -3,7 +3,9 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
+## [Stan's Tools 1.0.0] - 2026-11-09
+
+Stan's Tools now has its own version number (`stan_tools/version.py`), shown in the Setup panel.
 
 ### Added
 - Animation export option **Bake Constraints** (on by default). Bones moved by bone constraints (IK chains, Copy
@@ -34,6 +36,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - The mod's own `regulation.bin` params (e.g. NpcParam rows for ported characters) are exported in the background
     and used ahead of vanilla, and re-exported whenever the mod updates.
 - NrUnpack 1.2.0: `--regulation <file> --out <folder>` writes only the params, from any `regulation.bin`.
+- Setup shows the Stan's Tools version, the installed commit and the auto-updater's last result (up to date, update
+  downloaded, or why it is off), with a **Check for Updates** button.
+- A **Find Nightreign Eclipse** button next to Mod Files. Eclipse is also found when installed anywhere else (read
+  from the Eclipse launcher's log, plus every drive's root), and on first start even with no saved folders.
 
 ### Fixed
 - Search Character showed only the mod's characters when Project Root was missing or unpacked nothing: Nightreign now
@@ -44,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   body.
 - The mod's params export retries after a minute when it fails (e.g. `regulation.bin` locked by the running game), and
   Setup shows its status.
+- The auto-updater skipped every update when a library submodule sat at another commit (e.g. after an interrupted
+  update); it now only stops for real local edits, and says which files.
 - FLVER export no longer writes control-rig bones (tagged `soulstruct_control_rig`) into the FLVER skeleton.
 
 ---
