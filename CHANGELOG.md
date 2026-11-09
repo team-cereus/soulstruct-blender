@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Stan's Tools 1.0.1] - 2026-11-09
+
+### Fixed
+- Reading params failed with "Dll was not found." on most PCs, for the mod's params and for the automatic vanilla param
+  export. NrUnpack 1.2.1 now ships the ZSTD library `regulation.bin` needs: it only worked where a `libzstd.dll`
+  happened to be on PATH (e.g. Git's `mingw64in`).
+
 ## [Stan's Tools 1.0.0] - 2026-11-09
 
 Stan's Tools now has its own version number (`stan_tools/version.py`), shown in the Setup panel.

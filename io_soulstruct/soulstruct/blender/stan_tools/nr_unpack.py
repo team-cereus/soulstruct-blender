@@ -34,12 +34,12 @@ from ..general.matdefs import clear_cached_matdefs
 from ..general.properties import SoulstructSettings
 from .steam_paths import detect_game_root
 
-UNPACKER_VERSION = "1.2.0"
+UNPACKER_VERSION = "1.2.1"
 UNPACKER_URL = (
     "https://github.com/team-cereus/soulstruct-blender/releases/download/"
     f"nr-unpack-v{UNPACKER_VERSION}/NrUnpack.exe"
 )
-UNPACKER_SHA256 = "42a69086a13e2f6557af855cf6aa847f5f2e5ea283fe7cc35840172678e37d4f"
+UNPACKER_SHA256 = "22c70ba81e3c61e96da534fefd9062cfa753a2d0dcfe59462058d158b55c8579"
 _FREE_SPACE_MARGIN = 512 * 1024**2
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 

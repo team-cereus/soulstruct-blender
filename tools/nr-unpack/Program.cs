@@ -9,6 +9,7 @@
 // game folder.
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Xml;
 using Andre.IO.VFS;
 using Andre.Core;
@@ -68,6 +69,27 @@ static int ExportParams(string regulationPath, string outDir, string workDir)
     }
     return written;
 }
+
+// regulation.bin is ZSTD-compressed. ZstdNet loads a native libzstd.dll from an 'x64' folder next to its assembly,
+// which a single-file exe does not have, so Windows' normal search decides (it only worked where some libzstd.dll,
+// e.g. Git's mingw64in, was on PATH). Ship the DLL inside the exe and load it first: the import then binds to it.
+static void LoadBundledZstd()
+{
+    var dir = Path.Combine(Path.GetTempPath(), "NrUnpack", "native-1.4.5");
+    var path = Path.Combine(dir, "libzstd.dll");
+    using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("libzstd.dll")!;
+    if (!File.Exists(path) || new FileInfo(path).Length != resource.Length)
+    {
+        Directory.CreateDirectory(dir);
+        var temp = path + $".{Environment.ProcessId}.tmp";
+        using (var file = File.Create(temp))
+            resource.CopyTo(file);
+        File.Move(temp, path, overwrite: true);
+    }
+    NativeLibrary.Load(path);
+}
+
+LoadBundledZstd();
 
 string? gameDir = null, outDir = null, regulationPath = null;
 var includes = new List<string>();

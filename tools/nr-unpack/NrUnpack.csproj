@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>NrUnpack</AssemblyName>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <SmithboxDir Condition="'$(SmithboxDir)' == ''">S:\Smithbox</SmithboxDir>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -22,6 +22,8 @@
     <ProjectReference Include="$(SmithboxDir)\src\Andre\Andre.IO\Andre.IO.csproj" />
     <EmbeddedResource Include="$(SmithboxDir)\src\Andre\Andre.Formats\Resources\EldenRingNightreignDictionary.txt"
                       LogicalName="EldenRingNightreignDictionary.txt" />
+    <!-- ZstdNet's native library (regulation.bin is ZSTD-compressed); loaded from the exe, see Program.cs. -->
+    <EmbeddedResource Include="$(NuGetPackageRoot)zstdnet/1.4.5/build/x64/libzstd.dll" LogicalName="libzstd.dll" />
   </ItemGroup>
 
   <!-- Layouts of the params Stan's Tools reads. An embedded def is what selects a param for export. -->
