@@ -371,6 +371,9 @@ class ExportMapPieceFLVERs(LoggingOperator):
 class BaseGameFLVERBinderExportOperator(LoggingOperator):
     """Base class for operator that exports a FLVER directly into game Binder (MAPBND, CHRBND, OBJBND, PARTSBND)."""
 
+    # If the binder exists in neither the project nor the game directory, start a new empty one instead of failing.
+    ALLOW_NEW_BINDER: tp.ClassVar[bool] = False
+
     @staticmethod
     def _get_binder_path(settings: SoulstructSettings, model_stem: str) -> Path:
         raise NotImplementedError
@@ -425,6 +428,14 @@ class BaseGameFLVERBinderExportOperator(LoggingOperator):
         relative_binder_path = self._get_binder_path(settings, bl_flver.game_name)
         try:
             binder = settings.get_initial_binder(self, relative_binder_path, binder_class)
+        except FileNotFoundError as ex:
+            if not self.ALLOW_NEW_BINDER:
+                raise FLVERExportError(
+                    f"Cannot find {cls_name} binder for {bl_flver.name}: '{relative_binder_path}'. Error: {ex}"
+                )
+            # A new model id (e.g. a hand-made asset): start an empty binder of the right type.
+            self.info(f"No {cls_name} '{relative_binder_path}' in project or game directory: creating a new one.")
+            binder = binder_class()
         except Exception as ex:
             raise FLVERExportError(
                 f"Cannot find {cls_name} binder for {bl_flver.name}: '{relative_binder_path}'. Error: {ex}"
@@ -980,11 +991,20 @@ class ExportAssetFLVER(BaseGameFLVERBinderExportOperator):
     """Export a single FLVER model from a Blender mesh into same-named GEOMBND in the game directory."""
     bl_idname = "export_scene.asset_flver"
     bl_label = "Export Asset"
-    bl_description = "Export a FLVER model file into same-named game GEOMBND (which must exist)"
+    bl_description = (
+        "Export a FLVER model file into same-named GEOMBND (asset/aeg/aegXXX/aegXXX_YYY.geombnd). A model id that "
+        "has no GEOMBND yet gets a new one in the project directory"
+    )
+
+    # New asset ids (hand-made pieces) have no binder anywhere yet.
+    ALLOW_NEW_BINDER = True
 
     @staticmethod
     def _get_binder_path(settings: SoulstructSettings, model_stem: str) -> Path:
-        return Path(f"asset/{model_stem[:6]}/{model_stem}.geombnd")
+        # Elden Ring / Nightreign layout: asset/aeg/aeg023/aeg023_666.geombnd (was `asset/AEG023/...`, which no game
+        # has, so this operator could never find a binder).
+        stem = model_stem.lower()
+        return Path("asset") / "aeg" / stem[:6] / f"{stem}.geombnd"
 
     @classmethod
     def poll(cls, context):

@@ -383,7 +383,14 @@ class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyG
     @property
     def read_flvers_with_pyrelink(self) -> bool:
         """pyrelink 0.3.4 cannot read Nightreign FLVERs (version 0x20021: non-zero header padding at offset 116), so
-        those are always read with soulstruct. Writing still follows `use_pyrelink_flver`."""
+        those are always read with soulstruct. Writing follows `write_flvers_with_pyrelink`."""
+        return self.use_pyrelink_flver and not self.is_game(NIGHTREIGN)
+
+    @property
+    def write_flvers_with_pyrelink(self) -> bool:
+        """pyrelink 0.3.4 writes FLVER2 >= 0x2001A without the skeleton set that follows the textures, so SoulsFormats
+        (Smithbox, MapKit) cannot read its Nightreign exports at all (checked 2026-11-24 on AEG023_666). Nightreign
+        FLVERs are therefore always written with soulstruct, which writes that struct."""
         return self.use_pyrelink_flver and not self.is_game(NIGHTREIGN)
 
     @property

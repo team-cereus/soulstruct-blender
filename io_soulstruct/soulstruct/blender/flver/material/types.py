@@ -454,8 +454,14 @@ class BlenderFLVERMaterial:
         # mapped to the same FLVER `Material`/`VertexArrayLayout` combo (created here).
         flver_material = self.to_flver_material(operator, context, matdef, texture_collection, get_texture_path_prefix)
         array_layout = matdef.get_vertex_array_layout(is_dynamic=split_mesh_def_kwargs["is_dynamic"])
+        if operator.settings(context).is_game(NIGHTREIGN) and not split_mesh_def_kwargs["is_dynamic"]:
+            array_layout = _nightreign_static_layout(array_layout)
 
-        used_uv_layer_names = [layer.name for layer in matdef.get_used_uv_layers()]
+        # The layout's UV count comes from `get_uv_slot_tuple()` (Elden Ring / Nightreign: the shader's full slot list,
+        # e.g. `UVTexture0` + `UVBlend` for `M[AMSN_V][Mb2][Ov_N]`), so the layer names must too. Sampler-only
+        # `get_used_uv_layers()` gave one name for two slots and every soulstruct (Python) export of such a material
+        # failed with "UV layer names ... do not match layout UV count". Other games: the two are the same list.
+        used_uv_layer_names = [layer.name for layer in matdef.get_uv_slot_tuple()]
         operator.debug(
             f"Created FLVER SplitMeshDef with material '{flver_material.name}' and UV layers: {used_uv_layer_names}"
         )
@@ -645,3 +651,27 @@ def _get_non_terminator_gx_items(material: Material) -> list[GXItem]:
             break  # do not append this final terminator item
         non_term_gx_items.append(gx_item)
     return non_term_gx_items
+
+
+def _nightreign_static_layout(layout: VertexArrayLayout) -> VertexArrayLayout:
+    """Static Nightreign asset layout from the Elden Ring map-piece layout soulstruct builds.
+
+    Every vanilla NR asset (333 layouts of aeg003/004/023 checked 2026-11-24) stores normals and tangents as
+    `UByte4` (`FourBytesB`), never `UByte4Norm` (`FourBytesC`), and the AEG023 sewer kit's own m35_00 materials carry
+    ONE tangent even where soulstruct's rule adds a second one for a secondary normal map. Two `Tangent0` members also
+    end up on the same stream after `MapKit flvernr`, which no vanilla model has. So: `FourBytesB` normal / tangent,
+    first tangent only. Everything else is unchanged.
+    """
+    from soulstruct.flver.vertex_array_layout import VertexDataFormatEnum, VertexNormal, VertexTangent
+
+    types = []
+    for data_type in layout.read_types:
+        if isinstance(data_type, VertexTangent):
+            if any(isinstance(t, VertexTangent) for t in types):
+                continue
+            types.append(VertexTangent(VertexDataFormatEnum.FourBytesB, 0))
+        elif isinstance(data_type, VertexNormal):
+            types.append(VertexNormal(VertexDataFormatEnum.FourBytesB, 0))
+        else:
+            types.append(data_type)
+    return VertexArrayLayout(types)

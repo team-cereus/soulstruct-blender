@@ -16,6 +16,7 @@ import numpy as np
 
 from soulstruct.flver import *
 from soulstruct.flver.bone_tools import BoneTree
+from soulstruct.flver.vertex_array_layout import VertexTangent
 from soulstruct.flver.utilities import hash_material
 from soulstruct.base.models.shaders import MatDef
 from soulstruct.games import GameType
@@ -98,7 +99,7 @@ class _CreateFLVERCommand:
 
         is_flver0 = version <= 0xFFFF  # FLVER0 (Demon's Souls)
 
-        if self.settings.use_pyrelink_flver:
+        if self.settings.write_flvers_with_pyrelink:
             # Construct empty C++ `pyre_flver.FLVER` object.
             self.flver = pyre_flver.FLVER()
             self.flver.big_endian = self.bl_flver.big_endian
@@ -385,6 +386,14 @@ def _create_flver_meshes(
 
     _unify_flver0_material_layouts(command, split_mesh_defs)
 
+    # Most tangent arrays any layout asks for. Elden Ring / Nightreign static layouts add a second tangent for a
+    # material with primary AND secondary/detail normal maps (e.g. m35_00_041 `M[AMSN_V][Mb2][Ov_N]`), even when both
+    # sample the one `UVTexture0` layer, of which only one tangent array is computed below.
+    max_layout_tangents = max(
+        (sum(1 for data_type in smd.layout.write_types if isinstance(data_type, VertexTangent)) for smd in split_mesh_defs),
+        default=0,
+    )
+
     if is_pyre_flver:
         split_mesh_defs = [split_mesh_def_to_pyrelink(smd) for smd in split_mesh_defs]
 
@@ -394,7 +403,7 @@ def _create_flver_meshes(
     remaining_bl_uv_layer_names = set(bl_uv_layer_names)
     used_uv_layer_names = set()
     for matdef, bl_material in zip(matdefs, command.bl_flver.mesh.data.materials):
-        for used_layer in matdef.get_used_uv_layers():
+        for used_layer in matdef.get_uv_slot_tuple():  # same list the vertex array layout is built from
             if used_layer.name not in bl_uv_layer_names:
                 raise FLVERExportError(
                     f"Material '{bl_material.name}' with def '{matdef.name}' (shader '{matdef.shader_stem}') "
@@ -614,6 +623,10 @@ def _create_flver_meshes(
     else:
         # Later games support multiple vertex tangents and do not overload the bitangents.
         loop_bitangents = None
+        if loop_tangent_arrays and len(loop_tangent_arrays) < max_layout_tangents:
+            # Repeat the last tangent array (same UV layer) for the extra tangent slots of the layout. Without this the
+            # Python splitter failed with `IndexError` on `tangents[1]`.
+            loop_tangent_arrays += [loop_tangent_arrays[-1]] * (max_layout_tangents - len(loop_tangent_arrays))
 
     command.operator.debug(f"Constructed combined loop array in {time.perf_counter() - p} s.")
 
